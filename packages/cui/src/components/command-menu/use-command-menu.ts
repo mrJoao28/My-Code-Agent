@@ -3,7 +3,7 @@ import { ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { getFilteredCommands } from "./filter-commands";
 import type { Command } from "./types";
-import { useKeyboardLayer } from "../../providers/toast/keyboard-layer";
+import { useKeyboardLayer } from "../../providers/keyboard-layer";
 
 type UseCommandMenuReturn = {
     showCommandMenu: boolean;

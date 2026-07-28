@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { TextAttributes,RGBA } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type { DialogConfig } from "./types";
-import { useKeyboardLayer } from "../toast/keyboard-layer";
+import { useKeyboardLayer } from "../keyboard-layer";
 import { useTheme } from "../theme";
 
 
