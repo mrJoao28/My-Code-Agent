@@ -2,6 +2,7 @@ import type {RefObject} from "react"
 import { TextAttributes , type ScrollBoxRenderable } from "@opentui/core"
 import { getFilteredCommands } from "./filter-commands"
 import { COMMANDS } from "./commands"
+import { useTheme } from "../../providers/theme";
 
 const MAX_VARIABLE_ITEMS = 9;
 
@@ -23,6 +24,7 @@ export function CommandMenu({
     onSelect,
     onExecute
 }:CommandMenuProps){
+    const {colors} = useTheme()
     const filtered = getFilteredCommands(query);
     const visibleHeight = Math.min(filtered.length,MAX_VARIABLE_ITEMS)
 
@@ -47,7 +49,7 @@ export function CommandMenu({
                     flexDirection="row"
                     paddingX={1}
                     height={1}
-                    backgroundColor={isSelected?"#89B4FA":undefined}
+                    backgroundColor={isSelected?colors.selection:undefined}
                     onMouseMove={()=>onSelect(i)}
                     onMouseDown={()=>onExecute(i)}
                     >
