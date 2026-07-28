@@ -6,11 +6,8 @@ const app = new Hono()
 
 app.onError((error,c)=>{
     if (error instanceof HTTPException){
-        return c.json({
-            error:error.message|| "Request failed"
-        },error.status)
+        return c.json({ error:error.message|| "Request failed" },error.status)
     }
-
     return c.json({error:"Internal server error"},500)
 })
 
