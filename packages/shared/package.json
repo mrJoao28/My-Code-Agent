@@ -1,0 +1,11 @@
+{
+    "name": "@myagent/shared",
+    "type": "module",
+    "private": true,
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "dependencies": {
+        "zod": "^4.4.3"
+    }
+}
