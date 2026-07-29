@@ -3,7 +3,7 @@ export type ModelPricing = {
     outputUsdPerMillionTokens:number
 }
 
-export type SupportedProvider = "antropic"|"openai"|"google"
+export type SupportedProvider = "anthropic"|"openai"|"google"
 
 
 type SupportedChatModelDefinition = {
@@ -15,7 +15,7 @@ type SupportedChatModelDefinition = {
 export const SUPPORTED_CHAT_MODELS = [
     {
         id:"claude-sonnet-4-6",
-        provider:"antropic",
+        provider:"anthropic",
         pricing:{
             inputUsdPerMillionTokens:3,
             outputUsdPerMillionTokens:15
@@ -23,7 +23,7 @@ export const SUPPORTED_CHAT_MODELS = [
     },
     {
         id:"claude-haiku-4-5",
-        provider:"antropic",
+        provider:"anthropic",
         pricing:{
             inputUsdPerMillionTokens:1,
             outputUsdPerMillionTokens:5
@@ -31,7 +31,7 @@ export const SUPPORTED_CHAT_MODELS = [
     },
     {
         id:"claude-opus-4-6",
-        provider:"antropic",
+        provider:"anthropic",
         pricing:{
             inputUsdPerMillionTokens:5,
             outputUsdPerMillionTokens:25

@@ -6,7 +6,7 @@ import { ErrorMessage, UserrMessage,BotMessage } from "../components/messages";
 import {z} from"zod"
 import { DEFAULT_CHAT_MODEL_ID } from "@myagent/shared";
 import { useToast } from "../providers/toast";
-import { appCLient } from "../lib/api-client";
+import { appClient } from "../lib/api-client";
 import { getErrorMessage } from "../lib/http-errors";
 
 const newSessionStateSchema = z.object({
@@ -40,7 +40,7 @@ useEffect(()=>{
     let ignore = false
     const createSession = async ()=>{
         try{
-            const res = await appCLient.session.$post({
+            const res = await appClient.session.$post({
                 json:{
                     title:state.message.slice(0,100),
                     cwd:process.cwd(),
