@@ -3,14 +3,17 @@ import { useNavigate, useLocation, replace } from "react-router";
 import { useTheme } from "../providers/theme";
 import { SessionShell } from "../components/session-shell";
 import { ErrorMessage, UserrMessage,BotMessage } from "../components/messages";
+import { Mode } from "../../../database/generated/prisma/enums";
 import {z} from"zod"
-import { DEFAULT_CHAT_MODEL_ID } from "@myagent/shared";
+
 import { useToast } from "../providers/toast";
 import { appClient } from "../lib/api-client";
 import { getErrorMessage } from "../lib/http-errors";
 
 const newSessionStateSchema = z.object({
-    message:z.string()
+    message:z.string(),
+    mode:z.enum(Mode),
+    model:z.string()
 })
 
 export function NewSession(){
@@ -47,8 +50,8 @@ useEffect(()=>{
                     initialMessage:{
                         role:"USER",
                         content:state.message,
-                        mode:"BUILD",
-                        model:DEFAULT_CHAT_MODEL_ID
+                        mode:state.mode,
+                        model:state.model
                     }
                 }
             })
@@ -79,7 +82,7 @@ useEffect(()=>{
 
     return (
         <SessionShell onSubmit={()=>{}} inputDisabled loading>
-            <UserrMessage message={state.message}/>
+            <UserrMessage message={state.message} mode={state.mode}/>
         </SessionShell>
     )
 }
