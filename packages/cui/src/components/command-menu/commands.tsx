@@ -1,4 +1,5 @@
-import { ThemeDialogContent } from "../../dialogs";
+import { SUPPORTED_CHAT_MODELS } from "@myagent/shared";
+import { SessionsDialogContent, ThemeDialogContent,AgentsDialogContent , ModelDialogContent} from "../../dialogs";
 import type { Command } from "./types";
 
 
@@ -48,7 +49,10 @@ export const COMMANDS:Command[]= [
         description:"Bowse pas sessions",
         value:"/sessions",
         action:(ctx)=>{
-            ctx.toast.show({message:"Starting new conversation..." ,})
+            ctx.dialog.open({
+                title:"Sessions",
+                children:<SessionsDialogContent/>
+            })
         }
     },
     {
@@ -69,7 +73,7 @@ export const COMMANDS:Command[]= [
         action:(ctx)=>{
             ctx.dialog.open({
                 title:"Select Model",
-                children:<text>Model selections coming soon...</text>
+                children:<ModelDialogContent models={SUPPORTED_CHAT_MODELS.map((model)=>model.id)}  onSelectModel={ctx.setModel}/>
             })
         }
     },
@@ -79,8 +83,8 @@ export const COMMANDS:Command[]= [
         value:"/agents",
         action:(ctx)=>{
             ctx.dialog.open({
-                title:"Select Mode",
-                children:<text>Agent selection coming soon...</text>
+                title:"Select agent",
+                children:<AgentsDialogContent currentMode={ctx.mode} onSelectMode={ctx.setMode}/>
             })
         }
     },
@@ -91,5 +95,13 @@ export const COMMANDS:Command[]= [
         action:(ctx)=>{
             ctx.exit();
         }
-    }
+    },
+    {
+        name:"new",
+        description:"QStart a new conversation",
+        value:"/new",
+        action:(ctx)=>{
+            ctx.navigate("/")
+        }
+    },
 ]
