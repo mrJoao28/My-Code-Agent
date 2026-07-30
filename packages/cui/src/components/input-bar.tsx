@@ -55,7 +55,7 @@ function findActiveMention(text: string, cursorOffset: number): MentionMatch | n
     start -= 1;
   }
   let end = safeOffset;
-  while (end > 0 && !/\s/.test(text[end - 1]!)) {
+  while (end < text.length && !/\s/.test(text[end]!)) {
     end += 1;
   }
 

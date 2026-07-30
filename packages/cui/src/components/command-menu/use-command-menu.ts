@@ -49,7 +49,6 @@ export function useCommandMenu(): UseCommandMenuReturn {
     [filteredCommands]
   );
 
-  // Escuta apenas as teclas de controle do menu SEM travar a digitação no textarea
   useKeyboard((key) => {
     if (!showCommandMenu) return;
 
