@@ -1,20 +1,12 @@
-import { resolve, relative, join } from "path";
+import { relative, join } from "path";
 import { readdir, readFile, stat } from "fs/promises";
 import { tool } from "ai";
 import { z } from "zod";
-
-function resolveSafePath(cwd: string, targetPath?: string) {
-    const resolved = resolve(cwd, targetPath ?? ".");
-    const rel = relative(cwd, resolved);
-    if (rel.startsWith("..") || resolve(cwd, rel) !== resolved) {
-        throw new Error(`Path "${targetPath}" está fora do diretório de trabalho`);
-    }
-    return resolved;
-}
+import { resolveSafePath } from "../utils/path";
 
 const DEFAULT_IGNORED = new Set(["node_modules", ".git", "dist", "build", ".next"]);
 const MAX_MATCHES = 200;
-const MAX_FILE_SIZE = 1_000_000; // 1MB — evita ler arquivos binários enormes
+const MAX_FILE_SIZE = 1_000_000; 
 
 async function collectFiles(dir: string, files: string[]) {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -47,7 +39,7 @@ export function createGrepTool(cwd: string) {
                 .describe("Se a busca diferencia maiúsculas/minúsculas. Padrão: false")
         }),
         execute: async ({ pattern, path, caseSensitive }) => {
-            const root = resolveSafePath(cwd, path);
+            const root = await resolveSafePath(cwd, path ?? ".");
             const regex = new RegExp(pattern, caseSensitive ? "g" : "gi");
 
             const files: string[] = [];
@@ -64,7 +56,7 @@ export function createGrepTool(cwd: string) {
                     if (info.size > MAX_FILE_SIZE) continue;
                     content = await readFile(filePath, "utf-8");
                 } catch {
-                    continue; // arquivo binário ou ilegível, ignora
+                    continue; 
                 }
 
                 const lines = content.split("\n");

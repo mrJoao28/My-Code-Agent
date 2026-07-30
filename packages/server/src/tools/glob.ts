@@ -1,16 +1,8 @@
-import { resolve, relative, join } from "path";
+import { relative, join } from "path";
 import { readdir } from "fs/promises";
 import { tool } from "ai";
 import { z } from "zod";
-
-function resolveSafePath(cwd: string, targetPath?: string) {
-    const resolved = resolve(cwd, targetPath ?? ".");
-    const rel = relative(cwd, resolved);
-    if (rel.startsWith("..") || resolve(cwd, rel) !== resolved) {
-        throw new Error(`Path "${targetPath}" está fora do diretório de trabalho`);
-    }
-    return resolved;
-}
+import { resolveSafePath } from "../utils/path";
 
 function globToRegExp(pattern: string): RegExp {
     let out = "";
@@ -70,7 +62,7 @@ export function createGlobTool(cwd: string) {
                 .describe("Diretório base para a busca, relativo ao diretório de trabalho")
         }),
         execute: async ({ pattern, path }) => {
-            const root = resolveSafePath(cwd, path);
+            const root = await resolveSafePath(cwd, path ?? ".");
             const matcher = globToRegExp(pattern);
             const results: string[] = [];
 

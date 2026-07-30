@@ -1,22 +1,15 @@
-import { resolve, relative } from "path";
-import { readFile } from "fs/promises";
+import { open } from "fs/promises";
 import { tool } from "ai";
 import { z } from "zod";
+import { resolveSafePath, toRelative } from "../utils/path";
 
-const MAX_FILE_SIZE = 10_000;
+const MAX_CONTENT_CHARS = 10_000;
 
-function resolveSafePath(cwd: string, targetPath: string) {
-    const resolved = resolve(cwd, targetPath);
-    const rel = relative(cwd, resolved);
-    if (rel.startsWith("..") || resolve(cwd, rel) !== resolved) {
-        throw new Error(`Path "${targetPath}" está fora do diretório de trabalho`);
-    }
-    return resolved;
-}
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
 
-export function createReadFIleTool(cwd: string) {
+export function createReadFileTool(cwd: string) {
     return tool({
-        description: `Lê o conteúdo de um arquivo de texto. Conteúdo maior que ${MAX_FILE_SIZE} caracteres é truncado.`,
+        description: `Lê o conteúdo de um arquivo de texto. Conteúdo maior que ${MAX_CONTENT_CHARS} caracteres é truncado. Arquivos maiores que ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB são rejeitados (use grep/offset+limit para arquivos grandes).`,
         inputSchema: z.object({
             path: z.string().describe("Caminho do arquivo, relativo ao diretório de trabalho"),
             offset: z
@@ -33,32 +26,56 @@ export function createReadFIleTool(cwd: string) {
                 .describe("Número máximo de linhas a retornar")
         }),
         execute: async ({ path, offset, limit }) => {
-            const resolvedPath = resolveSafePath(cwd, path);
-            const raw = await readFile(resolvedPath, "utf-8");
+            const resolvedPath = await resolveSafePath(cwd, path);
 
-            let lines = raw.split("\n");
-            const totalLines = lines.length;
+            const handle = await open(resolvedPath, "r");
+            try {
+             
+                const info = await handle.stat();
 
-            if (offset != null || limit != null) {
-                const start = offset ?? 0;
-                const end = limit != null ? start + limit : undefined;
-                lines = lines.slice(start, end);
+                if (!info.isFile()) {
+                    throw new Error(`"${path}" não é um arquivo regular`);
+                }
+
+                if (info.size > MAX_FILE_SIZE_BYTES) {
+                    throw new Error(
+                        `Arquivo "${path}" tem ${info.size} bytes, acima do limite de ${MAX_FILE_SIZE_BYTES} bytes. Use offset/limit ou a tool grep em vez de ler o arquivo inteiro.`
+                    );
+                }
+
+             
+                const buffer = Buffer.alloc(info.size);
+                await handle.read(buffer, 0, info.size, 0);
+                const raw = buffer.toString("utf-8");
+
+                let lines = raw.split("\n");
+                const totalLines = lines.length;
+
+                if (offset != null || limit != null) {
+                    const start = offset ?? 0;
+                    const end = limit != null ? start + limit : undefined;
+                    lines = lines.slice(start, end);
+                }
+
+                let content = lines.join("\n");
+                let truncated = false;
+
+                if (content.length > MAX_CONTENT_CHARS) {
+                    content = content.slice(0, MAX_CONTENT_CHARS);
+                    truncated = true;
+                }
+
+                return {
+                    path: toRelative(cwd, resolvedPath),
+                    content,
+                    totalLines,
+                    truncated
+                };
+            } finally {
+                await handle.close();
             }
-
-            let content = lines.join("\n");
-            let truncated = false;
-
-            if (content.length > MAX_FILE_SIZE) {
-                content = content.slice(0, MAX_FILE_SIZE);
-                truncated = true;
-            }
-
-            return {
-                path: relative(cwd, resolvedPath) || ".",
-                content,
-                totalLines,
-                truncated
-            };
         }
     });
 }
+
+export const createReadFIleTool = createReadFileTool;
