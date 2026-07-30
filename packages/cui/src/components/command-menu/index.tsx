@@ -59,7 +59,7 @@ export function CommandMenu({
                             </text>
                         </box>
                         <box flexGrow={1} flexShrink={1} overflow="hidden">
-                            <text selectable={false} fg={isSelected?"balck":"gray"}>
+                            <text selectable={false} fg={isSelected?"black":"gray"}>
                                 {cmd.description}
                             </text>
                             </box>
