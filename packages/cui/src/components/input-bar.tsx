@@ -426,6 +426,7 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
           width={"100%"}
           gap={1}
         >
+          {/* 🔑 2. Textarea 100% controlado e com key estática */}
           <textarea
             key="stable-input-bar-textarea"
             ref={textareaRef}
