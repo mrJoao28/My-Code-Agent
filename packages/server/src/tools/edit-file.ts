@@ -1,16 +1,9 @@
-import { resolve, relative } from "path";
-import { readFile, writeFile } from "fs/promises";
+import { readFile, writeFile, rename, unlink } from "fs/promises";
+import { dirname, join } from "path";
+import { randomUUID } from "crypto";
 import { tool } from "ai";
 import { z } from "zod";
-
-function resolveSafePath(cwd: string, targetPath: string) {
-    const resolved = resolve(cwd, targetPath);
-    const rel = relative(cwd, resolved);
-    if (rel.startsWith("..") || resolve(cwd, rel) !== resolved) {
-        throw new Error(`Path "${targetPath}" está fora do diretório de trabalho`);
-    }
-    return resolved;
-}
+import { resolveSafePath, toRelative } from "../utils/path";
 
 function countOccurrences(haystack: string, needle: string): number {
     if (needle.length === 0) return 0;
@@ -23,7 +16,18 @@ function countOccurrences(haystack: string, needle: string): number {
     return count;
 }
 
-export function ccreatedEditFileTool(cwd: string) {
+async function atomicWrite(targetPath: string, content: string): Promise<void> {
+    const tmpPath = join(dirname(targetPath), `.${randomUUID()}.tmp`);
+    try {
+        await writeFile(tmpPath, content, "utf-8");
+        await rename(tmpPath, targetPath);
+    } catch (e) {
+        await unlink(tmpPath).catch(() => {});
+        throw e;
+    }
+}
+
+export function createEditFileTool(cwd: string) {
     return tool({
         description:
             "Edita um arquivo substituindo um trecho exato de texto (old_str) por outro (new_str). old_str precisa aparecer exatamente uma vez no arquivo.",
@@ -33,7 +37,9 @@ export function ccreatedEditFileTool(cwd: string) {
             new_str: z.string().default("").describe("Texto que substitui old_str. Vazio para apenas remover o trecho")
         }),
         execute: async ({ path, old_str, new_str }) => {
-            const resolvedPath = resolveSafePath(cwd, path);
+            const resolvedPath = await resolveSafePath(cwd, path);
+
+
             const content = await readFile(resolvedPath, "utf-8");
 
             const occurrences = countOccurrences(content, old_str);
@@ -47,13 +53,17 @@ export function ccreatedEditFileTool(cwd: string) {
                 );
             }
 
-            const updated = content.replace(old_str, () => new_str);
-            await writeFile(resolvedPath, updated, "utf-8");
+            const idx = content.indexOf(old_str);
+            const updated = content.slice(0, idx) + new_str + content.slice(idx + old_str.length);
+
+            await atomicWrite(resolvedPath, updated);
 
             return {
-                path: relative(cwd, resolvedPath) || ".",
+                path: toRelative(cwd, resolvedPath),
                 replaced: true
             };
         }
     });
 }
+
+export const ccreatedEditFileTool = createEditFileTool;
