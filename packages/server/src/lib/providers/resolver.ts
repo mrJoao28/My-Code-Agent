@@ -1,6 +1,7 @@
 import { findSupportedChatModel, type SupportedChatModel, type SupportedChatModelId } from "@myagent/shared";
 import { resolveAnthropicModel } from "./anthropic";
 import { resolveOpenAIModel } from "./openai";
+import { resolveOllamaModel } from "./ollama";
 import { assertUnsupportedProvider, type ResolvedModel } from "./registry";
 
 export type { ResolvedModel } from "./registry";
@@ -13,6 +14,8 @@ function resolveSupportChatModel(model: SupportedChatModel): ResolvedModel {
             return resolveAnthropicModel(model.id);
         case "openai":
             return resolveOpenAIModel(model.id);
+        case "ollama":
+            return resolveOllamaModel(model.id);
         default:
             return assertUnsupportedProvider(provider);
     }
