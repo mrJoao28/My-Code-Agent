@@ -8,13 +8,21 @@ import { ccreatedEditFileTool } from "./edit-file";
 import { createReadFIleTool } from "./read-file";
 
 export function createTools(cwd: string, mode: Mode) {
-    return {
+    const readOnlyTools = {
         read_file: createReadFIleTool(cwd),
-        write_file: createWriteFIleTool(cwd),
-        edit_file: ccreatedEditFileTool(cwd),
         list_directory: createListDirectoryTool(cwd),
         glob: createGlobTool(cwd),
-        grep: createGrepTool(cwd),
+        grep: createGrepTool(cwd)
+    };
+
+    if (mode === "PLAN") {
+        return readOnlyTools;
+    }
+
+    return {
+        ...readOnlyTools,
+        write_file: createWriteFIleTool(cwd),
+        edit_file: ccreatedEditFileTool(cwd),
         bash: createBashTool(cwd)
     };
 }

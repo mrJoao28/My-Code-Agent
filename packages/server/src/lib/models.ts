@@ -9,9 +9,6 @@ import {
 import type { LanguageModel } from "ai"
 import type {ProviderOptions} from "@ai-sdk/provider-utils"
 
-
-
-
 type AnthropicModelId = Extract<SupportedChatModel, { provider: "anthropic" }>["id"]
 type OpenAIModelId = Extract<SupportedChatModel, { provider: "openai" }>["id"]
 
@@ -27,7 +24,7 @@ const ANTHROPIC_PROVIDER_OPTIONS:Partial<Record<AnthropicModelId,ProviderOptions
         anthropic:{
             thinking:{
                 type:"enabled",
-                budgeTokens:10000
+                budgetTokens:10000
             }
         }
     },
@@ -43,10 +40,8 @@ const ANTHROPIC_PROVIDER_OPTIONS:Partial<Record<AnthropicModelId,ProviderOptions
 
 const OPENAI_PROVIDER_OPTIONS:Partial<Record<OpenAIModelId,ProviderOptions>>={
     "gpt-5.4":{
-        anthropic:{
-            thinking:{
-                reasoningSummary:"detailed"
-            }
+        openai:{
+            reasoningSummary:"detailed"
         }
     },
 }
@@ -88,7 +83,7 @@ function resolveSupportChatModel(model: SupportedChatModel): ResolvedModel {
 }
 
 export function isSupportedChatModel(modelId: string): modelId is SupportedChatModelId {
-    return findSupportedChatModel(modelId) !== null
+    return findSupportedChatModel(modelId) !== undefined
 }
 
 export function resolveChatModel(modelId: string): ResolvedModel {
