@@ -3,7 +3,7 @@ export type ModelPricing = {
     outputUsdPerMillionTokens:number
 }
 
-export type SupportedProvider = "anthropic"|"openai"|"google"
+export type SupportedProvider = "anthropic"|"openai"|"google"|"ollama"
 
 
 type SupportedChatModelDefinition = {
@@ -61,6 +61,41 @@ export const SUPPORTED_CHAT_MODELS = [
             outputUsdPerMillionTokens:1.25
         },
     },
+    // Modelos locais (rodam via Ollama/LM Studio/llama.cpp na maquina do usuario, sem custo por token).
+    // O id deve ser exatamente igual ao nome do modelo instalado localmente (ex: o que aparece em `ollama list`).
+    // Para adicionar outro modelo que voce ja baixou localmente, basta copiar um bloco desses e trocar o id.
+    {
+        id:"llama3.1",
+        provider:"ollama",
+        pricing:{
+            inputUsdPerMillionTokens:0,
+            outputUsdPerMillionTokens:0
+        },
+    },
+    {
+        id:"qwen2.5-coder",
+        provider:"ollama",
+        pricing:{
+            inputUsdPerMillionTokens:0,
+            outputUsdPerMillionTokens:0
+        },
+    },
+    {
+        id:"deepseek-r1",
+        provider:"ollama",
+        pricing:{
+            inputUsdPerMillionTokens:0,
+            outputUsdPerMillionTokens:0
+        },
+    },
+    {
+    id:"llama3.2:1b",
+    provider:"ollama",
+    pricing:{
+        inputUsdPerMillionTokens:0,
+        outputUsdPerMillionTokens:0
+    },
+},
 ]   as const satisfies readonly  SupportedChatModelDefinition[]
 //i will add more
 
