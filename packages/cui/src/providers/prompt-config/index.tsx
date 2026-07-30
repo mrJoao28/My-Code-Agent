@@ -1,100 +1,54 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useRef,
-  useCallback,
-  useMemo,
-} from "react";
-import { useKeyboard, useRenderer } from "@opentui/react";
+import { createContext, useContext, useState, useCallback, useMemo } from "react";
+import type { ReactNode } from "react";
+import { DEFAULT_CHAT_MODEL_ID, type SupportedChatModelId } from "@myagent/shared";
+import { Mode } from "../../../../database/generated/prisma/enums";
 
-type Responder = () => boolean;
-
-type KeyboardLayerContextValue = {
-  push: (id: string, responder?: Responder) => void;
-  pop: (id: string) => void;
-  isTopLayer: (id: string) => boolean;
-  setResponder: (id: string, responder: Responder | null) => void;
+type PromptConfigContextValue = {
+  mode: Mode;
+  toggleMode: () => void;
+  setMode: (mode: Mode) => void;
+  model: SupportedChatModelId;
+  setModel: (model: SupportedChatModelId) => void;
 };
 
-const KeyboardLayerContext = createContext<KeyboardLayerContextValue | null>(null);
+const PromptConfigContext = createContext<PromptConfigContextValue | null>(null);
 
-export function KeyboardLayerProvider({ children }: { children: React.ReactNode }) {
-  const [stack, setStack] = useState<string[]>(["base"]);
-  const stackRef = useRef(stack);
-  stackRef.current = stack;
+export function usePromptConfig(): PromptConfigContextValue {
+  const value = useContext(PromptConfigContext);
 
-  const responders = useRef<Map<string, Responder>>(new Map());
-  const renderer = useRenderer();
+  if (!value) {
+    throw new Error("usePromptConfig must be used within a PromptConfigProvider");
+  }
 
-  const push = useCallback((id: string, responder?: Responder) => {
-    if (responder) {
-      responders.current.set(id, responder);
-    }
+  return value;
+}
 
-    setStack((prev) => {
-      // Se a camada já for a do topo, não atualiza o estado
-      if (prev[prev.length - 1] === id) return prev;
-      const filtered = prev.filter((layer) => layer !== id);
-      return [...filtered, id];
-    });
+type PromptConfigProviderProps = {
+  children: ReactNode;
+};
+
+export function PromptConfigProvider({ children }: PromptConfigProviderProps) {
+  const [mode, setMode] = useState<Mode>(Mode.BUILD);
+  const [model, setModel] = useState<SupportedChatModelId>(DEFAULT_CHAT_MODEL_ID);
+
+  const toggleMode = useCallback(() => {
+    setMode((m) => (m === Mode.BUILD ? Mode.PLAN : Mode.BUILD));
   }, []);
-
-  const pop = useCallback((id: string) => {
-    responders.current.delete(id);
-    setStack((prev) => {
-      // 🛑 CORREÇÃO CRÍTICA: Se a camada não está na pilha, NÃO altera o estado
-      if (!prev.includes(id)) return prev;
-      return prev.filter((layer) => layer !== id);
-    });
-  }, []);
-
-  const isTopLayer = useCallback(
-    (id: string) => {
-      if (stack.length === 0) return true;
-      return stack[stack.length - 1] === id;
-    },
-    [stack]
-  );
-
-  const setResponder = useCallback((id: string, responder: Responder | null) => {
-    if (responder) {
-      responders.current.set(id, responder);
-    } else {
-      responders.current.delete(id);
-    }
-  }, []);
-
-  useKeyboard((key) => {
-    if (!key.ctrl || key.name !== "c") return;
-
-    const currentStack = stackRef.current;
-    for (let i = currentStack.length - 1; i >= 0; i--) {
-      const layerId = currentStack[i]!;
-      const responder = responders.current.get(layerId);
-      if (responder && responder()) {
-        return;
-      }
-    }
-    renderer.destroy();
-  });
 
   const value = useMemo(
-    () => ({ push, pop, isTopLayer, setResponder }),
-    [push, pop, isTopLayer, setResponder]
+    () => ({
+      mode,
+      toggleMode,
+      setMode,
+      model,
+      setModel,
+    }),
+    [mode, toggleMode, setMode, model, setModel]
   );
 
   return (
-    <KeyboardLayerContext.Provider value={value}>
+    <PromptConfigContext.Provider value={value}>
       {children}
-    </KeyboardLayerContext.Provider>
+    </PromptConfigContext.Provider>
   );
-}
-
-export function useKeyboardLayer() {
-  const context = useContext(KeyboardLayerContext);
-  if (!context) {
-    throw new Error("useKeyboardLayer must be used within a KeyboardLayerProvider");
-  }
-  return context;
 }
