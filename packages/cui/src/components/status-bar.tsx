@@ -12,7 +12,7 @@ export function StatusBar(){
             {mode===Mode.PLAN ?"Plan":"Build"}
             </text>
             <text attributes={TextAttributes.DIM} fg={colors.dimSeparator}>{ ">"} </text>
-        <tex>{model}</tex>
+        <text>{model}</text>
         </box>
     )
 }

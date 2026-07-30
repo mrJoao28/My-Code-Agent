@@ -13,9 +13,9 @@ export function RootLayout(){
                 <KeyboardLayerProvider>
                     <DialogProvider>
                         <PromptConfigProvider>
-                        <ThemeProvider>
+                   
                             <Outlet/>
-                        </ThemeProvider>
+                      
                         </PromptConfigProvider>
                     </DialogProvider>
                 </KeyboardLayerProvider>
