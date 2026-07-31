@@ -5,38 +5,6 @@ import type { Command } from "./types";
 
 export const COMMANDS:Command[]= [
     {
-        name:"logout",
-        description:"Sign out of your account",
-        value:"/logout",
-        action:(ctx)=>{
-            ctx.toast.show({message:"Logout is not implemented yet." ,})
-        }
-    },
-    {
-        name:"upgrade",
-        description:"Buy more credits",
-        value:"/upgrade",
-        action:(ctx)=>{
-            ctx.toast.show({message:"Upgrade is not implemented yet." ,})
-        }
-    },
-    {
-        name:"usage",
-        description:"Open billing portal in your browser",
-        value:"/usage",
-        action:(ctx)=>{
-            ctx.toast.show({message:"Usage portal is not implemented yet." ,})
-        }
-    },
-    {
-        name:"login",
-        description:"Sign in with your browser",
-        value:"/login",
-        action:(ctx)=>{
-            ctx.toast.show({message:"Login is not implemented yet." ,})
-        }
-    },
-    {
         name:"sessions",
         description:"Browse past sessions",
         value:"/sessions",

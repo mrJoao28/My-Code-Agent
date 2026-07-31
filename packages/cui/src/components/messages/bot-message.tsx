@@ -116,7 +116,7 @@ export function BotMessage({
                     {">"}
                 </text>
                 <text attributes={TextAttributes.DIM}>{model}</text>
-                {duration || interrupted && (
+                {(duration || interrupted) && (
                     <>
                     <text attributes={TextAttributes.DIM} fg={colors.dimSeparator}>
                     {">"}
