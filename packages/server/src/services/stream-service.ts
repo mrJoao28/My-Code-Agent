@@ -25,8 +25,7 @@ export type StreamParams = {
 export async function streamAIResponse(stream: StreamSSEArg, params: StreamParams): Promise<void> {
     const { sessionId, model, history, mode, abortController, cwd } = params;
     const startTime = Date.now();
-    const tools = cwd ? createTools(cwd, mode) : undefined;
-    const parts: MessagePart[] = [];
+const tools = cwd ? createTools(cwd, mode, sessionId) : undefined;    const parts: MessagePart[] = [];
     const toolGuard = new ToolCallGuard();
 
 

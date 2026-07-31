@@ -61,9 +61,6 @@ export const SUPPORTED_CHAT_MODELS = [
             outputUsdPerMillionTokens:1.25
         },
     },
-    // Modelos locais (rodam via Ollama/LM Studio/llama.cpp na maquina do usuario, sem custo por token).
-    // O id deve ser exatamente igual ao nome do modelo instalado localmente (ex: o que aparece em `ollama list`).
-    // Para adicionar outro modelo que voce ja baixou localmente, basta copiar um bloco desses e trocar o id.
     {
         id:"llama3.1",
         provider:"ollama",
@@ -96,6 +93,30 @@ export const SUPPORTED_CHAT_MODELS = [
         outputUsdPerMillionTokens:0
     },
 },
+{
+        id:"gemini-3-pro",
+        provider:"google",
+        pricing:{
+            inputUsdPerMillionTokens:2,
+            outputUsdPerMillionTokens:12
+        },
+    },
+    {
+        id:"gemini-3.6-flash",
+        provider:"google",
+        pricing:{
+            inputUsdPerMillionTokens:1.5,
+            outputUsdPerMillionTokens:7.5
+        },
+    },
+    {
+        id:"gemini-3.5-flash-lite",
+        provider:"google",
+        pricing:{
+            inputUsdPerMillionTokens:0.3,
+            outputUsdPerMillionTokens:2.5
+        },
+    },
 ]   as const satisfies readonly  SupportedChatModelDefinition[]
 //i will add more
 
