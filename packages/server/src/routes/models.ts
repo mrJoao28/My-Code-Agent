@@ -2,8 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import type { SupportedProvider } from "@myagent/shared";
-import { SUPPORTED_CHAT_MODELS } from "@myagent/shared";
-import { addCustomModel, getAllModels } from "../lib/model-registry";
+import { addCustomModel, findModel, getAllModels } from "../lib/model-registry";
 import { upsertEnvValue } from "../lib/env";
 
 const providerSchema = z.enum(["anthropic", "openai", "google", "ollama"]);
@@ -15,19 +14,16 @@ const addModelSchema = z.object({
 });
 
 const app = new Hono()
-  .get("/", (c) => {
-    return c.json(getAllModels());
-  })
+  .get("/", (c) => c.json(getAllModels()))
   .post("/", zValidator("json", addModelSchema), async (c) => {
     const { id, provider, token } = c.req.valid("json");
 
-    if (provider !== "ollama" && !token) {
-      return c.json({ error: "A provider token is required for cloud models" }, 400);
+    if (findModel(id)) {
+      return c.json({ error: `Model already exists: ${id}` }, 409);
     }
 
-    const isBuiltIn = SUPPORTED_CHAT_MODELS.some((model) => model.id === id);
-    if (isBuiltIn) {
-      return c.json({ error: `Model already exists: ${id}` }, 409);
+    if (provider !== "ollama" && !token) {
+      return c.json({ error: "A provider token is required for cloud models" }, 400);
     }
 
     const envKey = provider === "ollama" ? undefined : makeApiKeyEnvName(provider, id);
