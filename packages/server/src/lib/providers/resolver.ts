@@ -1,4 +1,5 @@
-import { findSupportedChatModel, type SupportedChatModel, type SupportedChatModelId } from "@myagent/shared";
+import type { SupportedChatModelId, SupportedProvider } from "@myagent/shared";
+import { findModel, findCustomModel } from "../model-registry";
 import { resolveAnthropicModel } from "./anthropic";
 import { resolveOpenAIModel } from "./openai";
 import { resolveGoogleModel } from "./google";
@@ -7,32 +8,43 @@ import { assertUnsupportedProvider, type ResolvedModel } from "./registry";
 
 export type { ResolvedModel } from "./registry";
 
-function resolveSupportChatModel(model: SupportedChatModel): ResolvedModel {
-    const provider = model.provider;
-
-    switch (provider) {
-        case "anthropic":
-            return resolveAnthropicModel(model.id);
-        case "openai":
-            return resolveOpenAIModel(model.id);
-        case "google":
-            return resolveGoogleModel(model.id);
-        case "ollama":
-            return resolveOllamaModel(model.id);
-        default:
-            return assertUnsupportedProvider(provider);
-    }
+function resolveSupportedModel(
+  provider: SupportedProvider,
+  modelId: string,
+  apiKey?: string,
+): ResolvedModel {
+  switch (provider) {
+    case "anthropic":
+      return resolveAnthropicModel(modelId, apiKey);
+    case "openai":
+      return resolveOpenAIModel(modelId, apiKey);
+    case "google":
+      return resolveGoogleModel(modelId, apiKey);
+    case "ollama":
+      return resolveOllamaModel(modelId);
+    default:
+      return assertUnsupportedProvider(provider);
+  }
 }
 
 export function isSupportedChatModel(modelId: string): modelId is SupportedChatModelId {
-    return findSupportedChatModel(modelId) !== undefined;
+  return findModel(modelId) !== undefined;
 }
 
 export function resolveChatModel(modelId: string): ResolvedModel {
-    const model = findSupportedChatModel(modelId);
-    if (!model) {
-        throw new Error(`Unsupported models: ${modelId}`);
-    }
+  const model = findModel(modelId);
+  if (!model) {
+    throw new Error(`Unsupported model: ${modelId}`);
+  }
 
-    return resolveSupportChatModel(model);
+  const customModel = findCustomModel(modelId);
+  const apiKey = customModel?.apiKeyEnv
+    ? process.env[customModel.apiKeyEnv]
+    : undefined;
+
+  if (model.provider !== "ollama" && customModel && !apiKey) {
+    throw new Error(`Missing API token for model: ${modelId}`);
+  }
+
+  return resolveSupportedModel(model.provider, model.id, apiKey);
 }
