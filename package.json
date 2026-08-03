@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "workspaces": ["packages/*"],
   "scripts": {
-   "dev:cli": "bun --env-file=.env --watch packages/cui/src/index.tsx",
-    "dev:server": "bun run --hot packages/server/src/index.ts"
+    "dev": "bun run --parallel dev:database dev:server dev:cli",
+    "dev:database": "bun --cwd packages/database run db:dev",
+    "dev:cli": "bun --env-file=.env --watch packages/cui/src/index.tsx",
+    "dev:server": "bun --env-file=.env run --hot packages/server/src/index.ts"
   },
   "dependencies": {
     "hono": "^4.12.32"
