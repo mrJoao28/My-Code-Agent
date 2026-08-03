@@ -1,4 +1,4 @@
-import { google } from "@ai-sdk/google";
+import { createGoogleGenerativeAI, google } from "@ai-sdk/google";
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type { ResolvedModel } from "./registry";
 
@@ -11,7 +11,7 @@ export const GOOGLE_PROVIDER_OPTIONS: Record<string, ProviderOptions> = {
 };
 
 export function resolveGoogleModel(modelId: string, apiKey?: string): ResolvedModel {
-  const provider = apiKey ? google({ apiKey }) : google;
+  const provider = apiKey ? createGoogleGenerativeAI({ apiKey }) : google;
 
   return {
     model: provider(modelId),
