@@ -1,23 +1,20 @@
-import { openai } from "@ai-sdk/openai";
-import type { SupportedChatModel } from "@myagent/shared";
+import { createOpenAI, openai } from "@ai-sdk/openai";
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type { ResolvedModel } from "./registry";
 
-export type OpenAIModelId = Extract<SupportedChatModel, { provider: "openai" }>["id"];
-
-export const OPENAI_PROVIDER_OPTIONS: Partial<Record<OpenAIModelId, ProviderOptions>> = {
-    "gpt-5.4": {
-        openai: {
-            reasoningSummary: "detailed"
-        }
-    }
+export const OPENAI_PROVIDER_OPTIONS: Record<string, ProviderOptions> = {
+  "gpt-5.4": {
+    openai: { reasoningSummary: "detailed" },
+  },
 };
 
-export function resolveOpenAIModel(modelId: OpenAIModelId): ResolvedModel {
-    return {
-        model: openai(modelId),
-        provider: "openai",
-        modelId,
-        providerOptions: OPENAI_PROVIDER_OPTIONS[modelId]
-    };
+export function resolveOpenAIModel(modelId: string, apiKey?: string): ResolvedModel {
+  const provider = apiKey ? createOpenAI({ apiKey }) : openai;
+
+  return {
+    model: provider(modelId),
+    provider: "openai",
+    modelId,
+    providerOptions: OPENAI_PROVIDER_OPTIONS[modelId],
+  };
 }

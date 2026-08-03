@@ -1,34 +1,27 @@
-import { anthropic } from "@ai-sdk/anthropic";
-import type { SupportedChatModel } from "@myagent/shared";
+import { anthropic, createAnthropic } from "@ai-sdk/anthropic";
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type { ResolvedModel } from "./registry";
 
-export type AnthropicModelId = Extract<SupportedChatModel, { provider: "anthropic" }>["id"];
-
-export const ANTHROPIC_PROVIDER_OPTIONS: Partial<Record<AnthropicModelId, ProviderOptions>> = {
-    "claude-opus-4-6": {
-        anthropic: {
-            thinking: {
-                type: "enabled",
-                budgetTokens: 10000
-            }
-        }
+export const ANTHROPIC_PROVIDER_OPTIONS: Record<string, ProviderOptions> = {
+  "claude-opus-4-6": {
+    anthropic: {
+      thinking: { type: "enabled", budgetTokens: 10000 },
     },
-    "claude-sonnet-4-6": {
-        anthropic: {
-            thinking: {
-                type: "enabled",
-                budgetTokens: 10000
-            }
-        }
-    }
+  },
+  "claude-sonnet-4-6": {
+    anthropic: {
+      thinking: { type: "enabled", budgetTokens: 10000 },
+    },
+  },
 };
 
-export function resolveAnthropicModel(modelId: AnthropicModelId): ResolvedModel {
-    return {
-        model: anthropic(modelId),
-        provider: "anthropic",
-        modelId,
-        providerOptions: ANTHROPIC_PROVIDER_OPTIONS[modelId]
-    };
+export function resolveAnthropicModel(modelId: string, apiKey?: string): ResolvedModel {
+  const provider = apiKey ? createAnthropic({ apiKey }) : anthropic;
+
+  return {
+    model: provider(modelId),
+    provider: "anthropic",
+    modelId,
+    providerOptions: ANTHROPIC_PROVIDER_OPTIONS[modelId],
+  };
 }

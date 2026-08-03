@@ -1,16 +1,14 @@
-import type { SupportedChatModelId, SupportedProvider } from "@myagent/shared";
+import type { SupportedProvider } from "@myagent/shared";
 import type { LanguageModel } from "ai";
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 
-
 export type ResolvedModel = {
-    model: LanguageModel;
-    provider: SupportedProvider;
-    modelId: SupportedChatModelId;
-    providerOptions?: ProviderOptions;
+  model: LanguageModel;
+  provider: SupportedProvider;
+  modelId: string;
+  providerOptions?: ProviderOptions;
 };
 
-// i will add more
 export function assertUnsupportedProvider(provider: never): never {
-    throw new Error(`Unsupported provider: ${provider}`);
+  throw new Error(`Unsupported provider: ${provider}`);
 }
