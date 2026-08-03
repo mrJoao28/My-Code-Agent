@@ -12,6 +12,19 @@ export type CustomModel = SupportedChatModelDefinition & {
 
 const CONFIG_PATH = join(process.cwd(), ".myagent", "models.json");
 
+export function getModelApiKeyEnv(model: SupportedChatModelDefinition | CustomModel) {
+  const custom = "apiKeyEnv" in model ? model.apiKeyEnv : undefined;
+  if (custom) return custom;
+  if (model.provider === "ollama") return undefined;
+
+  const normalized = model.id
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return `MYAGENT_${model.provider.toUpperCase()}_${normalized}_API_KEY`;
+}
+
 function ensureConfigDirectory() {
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
 }
@@ -46,6 +59,14 @@ export function findModel(modelId: string): SupportedChatModelDefinition | undef
 
 export function findCustomModel(modelId: string): CustomModel | undefined {
   return readCustomModels().find((model) => model.id === modelId);
+}
+
+export function isModelConfigured(modelId: string) {
+  const model = findModel(modelId);
+  if (!model || model.provider === "ollama") return true;
+
+  const envKey = getModelApiKeyEnv(model);
+  return Boolean(envKey && process.env[envKey]);
 }
 
 export function addCustomModel(input: {
