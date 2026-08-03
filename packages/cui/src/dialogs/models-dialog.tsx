@@ -7,12 +7,7 @@ import { DialogSearchList } from "../components/dialog-search-list";
 import { appClient } from "../lib/api-client";
 import type { SupportedProvider } from "@myagent/shared";
 
-type Model = {
-  id: string;
-  provider: SupportedProvider;
-  configured: boolean;
-};
-
+type Model = { id: string; provider: SupportedProvider; configured: boolean };
 type Props = { onSelectModel: (modelId: string) => void };
 
 const PROVIDERS: { id: SupportedProvider; label: string; kind: "Cloud" | "Local" }[] = [
@@ -31,17 +26,13 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
   const loadModels = useCallback(async () => {
     try {
       const response = await appClient.models.$get();
-      if (!response.ok) return;
-      const data = await response.json();
-      setModels(data as Model[]);
+      if (response.ok) setModels((await response.json()) as Model[]);
     } catch {
-      setModels([]);
+      // The list remains empty if the API is unavailable.
     }
   }, []);
 
-  useEffect(() => {
-    void loadModels();
-  }, [loadModels]);
+  useEffect(() => { void loadModels(); }, [loadModels]);
 
   const select = useCallback((model: Model) => {
     if (model.provider !== "ollama" && !model.configured) {
@@ -53,37 +44,40 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
   }, [dialog, onSelectModel]);
 
   if (adding) {
-    return <AddModelForm onCreated={onCreated => { onSelectModel(onCreated); dialog.close(); }} onCancel={() => setAdding(false)} />;
+    return (
+      <AddModelForm
+        onCreated={(id) => { onSelectModel(id); dialog.close(); }}
+        onCancel={() => setAdding(false)}
+      />
+    );
   }
 
   if (configuring) {
     return (
       <ConfigureKeyForm
         model={configuring}
-        onConfigured={() => {
-          onSelectModel(configuring.id);
-          dialog.close();
-        }}
+        onConfigured={() => { onSelectModel(configuring.id); dialog.close(); }}
         onCancel={() => setConfiguring(null)}
       />
     );
   }
 
-  const items = [{ id: "__add_model__", provider: "ollama" as const, configured: true }, ...models];
+  const addItem: Model = { id: "__add_model__", provider: "ollama", configured: true };
+  const items = [addItem, ...models];
 
   return (
     <DialogSearchList
       items={items}
-      onSelect={(item) => item.id === "__add_model__" ? setAdding(true) : select(item)}
-      filterFn={(item, query) => item.id === "__add_model__" || item.id.toLowerCase().includes(query.toLowerCase())}
+      onSelect={(item) => item.id === addItem.id ? setAdding(true) : select(item)}
+      filterFn={(item, query) => item.id === addItem.id || item.id.toLowerCase().includes(query.toLowerCase())}
       renderItem={(item, selected) => (
         <box flexDirection="row" justifyContent="space-between" width="100%">
           <text fg={selected ? "black" : undefined}>
-            {item.id === "__add_model__" ? "+ Add model" : item.id}
+            {item.id === addItem.id ? "+ Add model" : item.id}
           </text>
-          {item.id !== "__add_model__" && (
+          {item.id !== addItem.id && (
             <text attributes={TextAttributes.DIM}>
-              {item.provider === "ollama" ? "local" : item.configured ? "configured" : "API key required"}
+              {item.provider === "ollama" ? "local" : item.configured ? "ready" : "API key required"}
             </text>
           )}
         </box>
@@ -116,8 +110,7 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
     if (!id) return setError("Model name is required");
     if (isCloud && !apiToken) return setError("API key is required for cloud models");
 
-    setSaving(true);
-    setError(null);
+    setSaving(true); setError(null);
     try {
       const response = await appClient.models.$post({
         json: { id, provider: provider.id, ...(isCloud ? { token: apiToken } : {}) },
@@ -129,45 +122,37 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
       onCreated(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add model");
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }, [isCloud, modelName, onCreated, provider.id, saving, token]);
 
   useKeyboard((key) => {
-    if (key.name === "escape") { key.preventDefault(); onCancel(); }
+    if (key.name === "escape") { key.preventDefault(); onCancel(); return; }
     if (key.name === "left" || key.name === "right") {
       const delta = key.name === "left" ? -1 : 1;
       setProviderIndex(i => (i + delta + PROVIDERS.length) % PROVIDERS.length);
+      return;
     }
-    if ((key.name === "return" || key.name === "enter") && !key.shift) {
-      key.preventDefault(); void submit();
-    }
+    if ((key.name === "return" || key.name === "enter") && !key.shift) { key.preventDefault(); void submit(); }
   });
 
   return (
     <box flexDirection="column" gap={1}>
       <text attributes={TextAttributes.BOLD}>Add model</text>
-      <text attributes={TextAttributes.DIM}>Choose a provider, then enter the model identifier.</text>
-
+      <text attributes={TextAttributes.DIM}>Choose a provider and enter the model identifier.</text>
       <box flexDirection="row" justifyContent="space-between">
-        <text>Provider</text>
-        <text fg={colors.primary}>{provider.label} · {provider.kind}  ← →</text>
+        <text>Provider</text><text fg={colors.primary}>{provider.label} · {provider.kind}  ← →</text>
       </box>
-
       <box flexDirection="column" gap={0.5}>
         <text>Model</text>
         <textarea ref={modelRef} width="100%" height={1} value={modelName} placeholder="e.g. gpt-4.1" onContentChange={() => setModelName(modelRef.current?.plainText ?? "")} />
       </box>
-
       {isCloud && (
         <box flexDirection="column" gap={0.5}>
           <text>API key</text>
-          <textarea ref={tokenRef} width="100%" height={1} value={token} placeholder="Required to use this model" onContentChange={() => setToken(tokenRef.current?.plainText ?? "")} />
-          <text attributes={TextAttributes.DIM}>Saved locally in .env. It is never returned by the API.</text>
+          <textarea ref={tokenRef} width="100%" height={1} value={token} placeholder="Required for this cloud model" onContentChange={() => setToken(tokenRef.current?.plainText ?? "")} />
+          <text attributes={TextAttributes.DIM}>Stored locally in .env. Never returned by the API.</text>
         </box>
       )}
-
       {error && <text fg={colors.error}>{error}</text>}
       <text attributes={TextAttributes.DIM}>{saving ? "Saving..." : "Enter save · Esc cancel"}</text>
     </box>
@@ -186,11 +171,10 @@ function ConfigureKeyForm({ model, onConfigured, onCancel }: ConfigureKeyProps) 
   const submit = useCallback(async () => {
     const value = ref.current?.plainText.trim() || token.trim();
     if (!value) return setError("API key is required");
-    setSaving(true);
+    setSaving(true); setError(null);
     try {
       const response = await appClient.models[":id"].key.$post({
-        param: { id: encodeURIComponent(model.id) },
-        json: { token: value },
+        param: { id: encodeURIComponent(model.id) }, json: { token: value },
       });
       if (!response.ok) {
         const body = await response.json();
@@ -199,21 +183,21 @@ function ConfigureKeyForm({ model, onConfigured, onCancel }: ConfigureKeyProps) 
       onConfigured();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save API key");
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }, [model.id, onConfigured, token]);
 
   useKeyboard((key) => {
-    if (key.name === "escape") { key.preventDefault(); onCancel(); }
+    if (key.name === "escape") { key.preventDefault(); onCancel(); return; }
     if ((key.name === "return" || key.name === "enter") && !key.shift) { key.preventDefault(); void submit(); }
   });
 
   return (
     <box flexDirection="column" gap={1}>
       <text attributes={TextAttributes.BOLD}>API key required</text>
-      <text>Configure a key before using {model.id}.</text>
+      <text>Configure a key before using:</text>
+      <text fg={colors.primary}>{model.id}</text>
       <textarea ref={ref} width="100%" height={1} value={token} placeholder="Paste API key" onContentChange={() => setToken(ref.current?.plainText ?? "")} />
+      <text attributes={TextAttributes.DIM}>The key is saved locally in .env and never displayed again.</text>
       {error && <text fg={colors.error}>{error}</text>}
       <text attributes={TextAttributes.DIM}>{saving ? "Saving..." : "Enter save · Esc cancel"}</text>
     </box>
