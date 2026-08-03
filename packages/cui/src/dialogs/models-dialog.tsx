@@ -17,18 +17,57 @@ const PROVIDERS: { id: SupportedProvider; label: string; kind: "Cloud" | "Local"
   { id: "ollama", label: "Ollama", kind: "Local" },
 ];
 
+async function readError(response: Response, fallback: string) {
+  const text = await response.text();
+  if (!text.trim()) return fallback;
+
+  try {
+    const body: unknown = JSON.parse(text);
+    if (body && typeof body === "object" && "error" in body) {
+      const error = (body as { error?: unknown }).error;
+      if (typeof error === "string") return error;
+    }
+    if (body && typeof body === "object" && "message" in body) {
+      const message = (body as { message?: unknown }).message;
+      if (typeof message === "string") return message;
+    }
+  } catch {
+    // Some server/proxy errors are plain text. Do not surface JSON parse errors to users.
+  }
+
+  return text.length > 300 ? `${text.slice(0, 300)}...` : text;
+}
+
+async function readModels(response: Response): Promise<Model[]> {
+  const text = await response.text();
+  if (!text.trim()) throw new Error("The server returned an empty model list");
+
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error("The server returned invalid JSON. Restart the server and try again.");
+  }
+
+  if (!Array.isArray(body)) throw new Error("The server returned an invalid model list");
+  return body as Model[];
+}
+
 export const ModelDialogContent = ({ onSelectModel }: Props) => {
   const dialog = useDialog();
   const [models, setModels] = useState<Model[]>([]);
   const [adding, setAdding] = useState(false);
   const [configuring, setConfiguring] = useState<Model | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadModels = useCallback(async () => {
     try {
       const response = await appClient.models.$get();
-      if (response.ok) setModels((await response.json()) as Model[]);
-    } catch {
-      // The list remains empty if the API is unavailable.
+      if (!response.ok) throw new Error(await readError(response, `Unable to load models (${response.status})`));
+      setModels(await readModels(response));
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Unable to load models");
     }
   }, []);
 
@@ -44,48 +83,34 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
   }, [dialog, onSelectModel]);
 
   if (adding) {
-    return (
-      <AddModelForm
-        onCreated={(id) => { onSelectModel(id); dialog.close(); }}
-        onCancel={() => setAdding(false)}
-      />
-    );
+    return <AddModelForm onCreated={(id) => { onSelectModel(id); dialog.close(); }} onCancel={() => setAdding(false)} />;
   }
 
   if (configuring) {
-    return (
-      <ConfigureKeyForm
-        model={configuring}
-        onConfigured={() => { onSelectModel(configuring.id); dialog.close(); }}
-        onCancel={() => setConfiguring(null)}
-      />
-    );
+    return <ConfigureKeyForm model={configuring} onConfigured={() => { onSelectModel(configuring.id); dialog.close(); }} onCancel={() => setConfiguring(null)} />;
   }
 
   const addItem: Model = { id: "__add_model__", provider: "ollama", configured: true };
   const items = [addItem, ...models];
 
   return (
-    <DialogSearchList
-      items={items}
-      onSelect={(item) => item.id === addItem.id ? setAdding(true) : select(item)}
-      filterFn={(item, query) => item.id === addItem.id || item.id.toLowerCase().includes(query.toLowerCase())}
-      renderItem={(item, selected) => (
-        <box flexDirection="row" justifyContent="space-between" width="100%">
-          <text fg={selected ? "black" : undefined}>
-            {item.id === addItem.id ? "+ Add model" : item.id}
-          </text>
-          {item.id !== addItem.id && (
-            <text attributes={TextAttributes.DIM}>
-              {item.provider === "ollama" ? "local" : item.configured ? "ready" : "API key required"}
-            </text>
-          )}
-        </box>
-      )}
-      getKey={(item) => item.id}
-      placeholder="Search models..."
-      emptyText="No models found"
-    />
+    <box flexDirection="column" gap={1}>
+      {loadError && <text fg={useTheme().colors.error}>{loadError}</text>}
+      <DialogSearchList
+        items={items}
+        onSelect={(item) => item.id === addItem.id ? setAdding(true) : select(item)}
+        filterFn={(item, query) => item.id === addItem.id || item.id.toLowerCase().includes(query.toLowerCase())}
+        renderItem={(item, selected) => (
+          <box flexDirection="row" justifyContent="space-between" width="100%">
+            <text fg={selected ? "black" : undefined}>{item.id === addItem.id ? "+ Add model" : item.id}</text>
+            {item.id !== addItem.id && <text attributes={TextAttributes.DIM}>{item.provider === "ollama" ? "local" : item.configured ? "ready" : "API key required"}</text>}
+          </box>
+        )}
+        getKey={(item) => item.id}
+        placeholder="Search models..."
+        emptyText="No models found"
+      />
+    </box>
   );
 };
 
@@ -112,13 +137,8 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
 
     setSaving(true); setError(null);
     try {
-      const response = await appClient.models.$post({
-        json: { id, provider: provider.id, ...(isCloud ? { token: apiToken } : {}) },
-      });
-      if (!response.ok) {
-        const body = await response.json();
-        throw new Error("error" in body ? body.error : "Could not add model");
-      }
+      const response = await appClient.models.$post({ json: { id, provider: provider.id, ...(isCloud ? { token: apiToken } : {}) } });
+      if (!response.ok) throw new Error(await readError(response, `Could not add model (${response.status})`));
       onCreated(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add model");
@@ -127,11 +147,7 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
 
   useKeyboard((key) => {
     if (key.name === "escape") { key.preventDefault(); onCancel(); return; }
-    if (key.name === "left" || key.name === "right") {
-      const delta = key.name === "left" ? -1 : 1;
-      setProviderIndex(i => (i + delta + PROVIDERS.length) % PROVIDERS.length);
-      return;
-    }
+    if (key.name === "left" || key.name === "right") { const delta = key.name === "left" ? -1 : 1; setProviderIndex(i => (i + delta + PROVIDERS.length) % PROVIDERS.length); return; }
     if ((key.name === "return" || key.name === "enter") && !key.shift) { key.preventDefault(); void submit(); }
   });
 
@@ -139,20 +155,9 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
     <box flexDirection="column" gap={1}>
       <text attributes={TextAttributes.BOLD}>Add model</text>
       <text attributes={TextAttributes.DIM}>Choose a provider and enter the model identifier.</text>
-      <box flexDirection="row" justifyContent="space-between">
-        <text>Provider</text><text fg={colors.primary}>{provider.label} · {provider.kind}  ← →</text>
-      </box>
-      <box flexDirection="column" gap={0.5}>
-        <text>Model</text>
-        <textarea ref={modelRef} width="100%" height={1} value={modelName} placeholder="e.g. gpt-4.1" onContentChange={() => setModelName(modelRef.current?.plainText ?? "")} />
-      </box>
-      {isCloud && (
-        <box flexDirection="column" gap={0.5}>
-          <text>API key</text>
-          <textarea ref={tokenRef} width="100%" height={1} value={token} placeholder="Required for this cloud model" onContentChange={() => setToken(tokenRef.current?.plainText ?? "")} />
-          <text attributes={TextAttributes.DIM}>Stored locally in .env. Never returned by the API.</text>
-        </box>
-      )}
+      <box flexDirection="row" justifyContent="space-between"><text>Provider</text><text fg={colors.primary}>{provider.label} · {provider.kind}  ← →</text></box>
+      <box flexDirection="column" gap={0.5}><text>Model</text><textarea ref={modelRef} width="100%" height={1} value={modelName} placeholder="e.g. gpt-4.1" onContentChange={() => setModelName(modelRef.current?.plainText ?? "")} /></box>
+      {isCloud && <box flexDirection="column" gap={0.5}><text>API key</text><textarea ref={tokenRef} width="100%" height={1} value={token} placeholder="Required for this cloud model" onContentChange={() => setToken(tokenRef.current?.plainText ?? "")} /><text attributes={TextAttributes.DIM}>Stored locally in .env. Never returned by the API.</text></box>}
       {error && <text fg={colors.error}>{error}</text>}
       <text attributes={TextAttributes.DIM}>{saving ? "Saving..." : "Enter save · Esc cancel"}</text>
     </box>
@@ -173,13 +178,8 @@ function ConfigureKeyForm({ model, onConfigured, onCancel }: ConfigureKeyProps) 
     if (!value) return setError("API key is required");
     setSaving(true); setError(null);
     try {
-      const response = await appClient.models[":id"].key.$post({
-        param: { id: encodeURIComponent(model.id) }, json: { token: value },
-      });
-      if (!response.ok) {
-        const body = await response.json();
-        throw new Error("error" in body ? body.error : "Could not save API key");
-      }
+      const response = await appClient.models[":id"].key.$post({ param: { id: encodeURIComponent(model.id) }, json: { token: value } });
+      if (!response.ok) throw new Error(await readError(response, `Could not save API key (${response.status})`));
       onConfigured();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save API key");
