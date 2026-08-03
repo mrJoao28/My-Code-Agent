@@ -21,6 +21,9 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .env.production.local
 .env.local
 
+# local My-Code-Agent model registry
+.myagent/
+
 # caches
 .eslintcache
 .cache
