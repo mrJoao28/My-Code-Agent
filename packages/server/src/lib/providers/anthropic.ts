@@ -1,4 +1,4 @@
-import { anthropic } from "@ai-sdk/anthropic";
+import { anthropic, createAnthropic } from "@ai-sdk/anthropic";
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type { ResolvedModel } from "./registry";
 
@@ -16,7 +16,7 @@ export const ANTHROPIC_PROVIDER_OPTIONS: Record<string, ProviderOptions> = {
 };
 
 export function resolveAnthropicModel(modelId: string, apiKey?: string): ResolvedModel {
-  const provider = apiKey ? anthropic({ apiKey }) : anthropic;
+  const provider = apiKey ? createAnthropic({ apiKey }) : anthropic;
 
   return {
     model: provider(modelId),
