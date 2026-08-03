@@ -1,4 +1,4 @@
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI, openai } from "@ai-sdk/openai";
 import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type { ResolvedModel } from "./registry";
 
@@ -9,7 +9,7 @@ export const OPENAI_PROVIDER_OPTIONS: Record<string, ProviderOptions> = {
 };
 
 export function resolveOpenAIModel(modelId: string, apiKey?: string): ResolvedModel {
-  const provider = apiKey ? openai({ apiKey }) : openai;
+  const provider = apiKey ? createOpenAI({ apiKey }) : openai;
 
   return {
     model: provider(modelId),
