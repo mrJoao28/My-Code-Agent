@@ -20,7 +20,6 @@ const PROVIDERS: { id: SupportedProvider; label: string; kind: "Cloud" | "Local"
 async function readError(response: Response, fallback: string) {
   const text = await response.text();
   if (!text.trim()) return fallback;
-
   try {
     const body: unknown = JSON.parse(text);
     if (body && typeof body === "object" && "error" in body) {
@@ -32,29 +31,23 @@ async function readError(response: Response, fallback: string) {
       if (typeof message === "string") return message;
     }
   } catch {
-    // Some server/proxy errors are plain text. Do not surface JSON parse errors to users.
+    // Server/proxy errors may be plain text. Keep the real response instead of a JSON parse error.
   }
-
   return text.length > 300 ? `${text.slice(0, 300)}...` : text;
 }
 
 async function readModels(response: Response): Promise<Model[]> {
   const text = await response.text();
   if (!text.trim()) throw new Error("The server returned an empty model list");
-
   let body: unknown;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    throw new Error("The server returned invalid JSON. Restart the server and try again.");
-  }
-
+  try { body = JSON.parse(text); } catch { throw new Error("The server returned invalid JSON. Restart the server and try again."); }
   if (!Array.isArray(body)) throw new Error("The server returned an invalid model list");
   return body as Model[];
 }
 
 export const ModelDialogContent = ({ onSelectModel }: Props) => {
   const dialog = useDialog();
+  const { colors } = useTheme();
   const [models, setModels] = useState<Model[]>([]);
   const [adding, setAdding] = useState(false);
   const [configuring, setConfiguring] = useState<Model | null>(null);
@@ -82,20 +75,15 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
     dialog.close();
   }, [dialog, onSelectModel]);
 
-  if (adding) {
-    return <AddModelForm onCreated={(id) => { onSelectModel(id); dialog.close(); }} onCancel={() => setAdding(false)} />;
-  }
-
-  if (configuring) {
-    return <ConfigureKeyForm model={configuring} onConfigured={() => { onSelectModel(configuring.id); dialog.close(); }} onCancel={() => setConfiguring(null)} />;
-  }
+  if (adding) return <AddModelForm onCreated={(id) => { onSelectModel(id); dialog.close(); }} onCancel={() => setAdding(false)} />;
+  if (configuring) return <ConfigureKeyForm model={configuring} onConfigured={() => { onSelectModel(configuring.id); dialog.close(); }} onCancel={() => setConfiguring(null)} />;
 
   const addItem: Model = { id: "__add_model__", provider: "ollama", configured: true };
   const items = [addItem, ...models];
 
   return (
     <box flexDirection="column" gap={1}>
-      {loadError && <text fg={useTheme().colors.error}>{loadError}</text>}
+      {loadError && <text fg={colors.error}>{loadError}</text>}
       <DialogSearchList
         items={items}
         onSelect={(item) => item.id === addItem.id ? setAdding(true) : select(item)}
@@ -134,15 +122,13 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
     const apiToken = tokenRef.current?.plainText.trim() || token.trim();
     if (!id) return setError("Model name is required");
     if (isCloud && !apiToken) return setError("API key is required for cloud models");
-
     setSaving(true); setError(null);
     try {
       const response = await appClient.models.$post({ json: { id, provider: provider.id, ...(isCloud ? { token: apiToken } : {}) } });
       if (!response.ok) throw new Error(await readError(response, `Could not add model (${response.status})`));
       onCreated(id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not add model");
-    } finally { setSaving(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not add model"); }
+    finally { setSaving(false); }
   }, [isCloud, modelName, onCreated, provider.id, saving, token]);
 
   useKeyboard((key) => {
@@ -181,9 +167,8 @@ function ConfigureKeyForm({ model, onConfigured, onCancel }: ConfigureKeyProps) 
       const response = await appClient.models[":id"].key.$post({ param: { id: encodeURIComponent(model.id) }, json: { token: value } });
       if (!response.ok) throw new Error(await readError(response, `Could not save API key (${response.status})`));
       onConfigured();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save API key");
-    } finally { setSaving(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save API key"); }
+    finally { setSaving(false); }
   }, [model.id, onConfigured, token]);
 
   useKeyboard((key) => {
