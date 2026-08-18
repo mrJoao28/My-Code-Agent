@@ -1,5 +1,5 @@
 import type { SupportedChatModelId, SupportedProvider } from "@myagent/shared";
-import { findModel, findCustomModel } from "../model-registry";
+import { findModel, getModelApiKeyEnv } from "../model-registry";
 import { resolveAnthropicModel } from "./anthropic";
 import { resolveOpenAIModel } from "./openai";
 import { resolveGoogleModel } from "./google";
@@ -37,12 +37,10 @@ export function resolveChatModel(modelId: string): ResolvedModel {
     throw new Error(`Unsupported model: ${modelId}`);
   }
 
-  const customModel = findCustomModel(modelId);
-  const apiKey = customModel?.apiKeyEnv
-    ? process.env[customModel.apiKeyEnv]
-    : undefined;
+  const apiKeyEnv = getModelApiKeyEnv(model);
+  const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : undefined;
 
-  if (model.provider !== "ollama" && customModel && !apiKey) {
+  if (model.provider !== "ollama" && !apiKey) {
     throw new Error(`Missing API token for model: ${modelId}`);
   }
 
