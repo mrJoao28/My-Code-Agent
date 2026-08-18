@@ -9,7 +9,7 @@ export const MAX_IDENTICAL_REPEATS = 3;
 
 /** Timeout global (parede) para uma geração inteira, incluindo todos os
  * passos de tool-use. Independente do timeout por-step do provider. */
-export const GLOBAL_GENERATION_TIMEOUT_MS = 5 * 60_000; // 5 minutos
+export const GLOBAL_GENERATION_TIMEOUT_MS = 5 * 60_000;
 
 export class ToolLoopDetectedError extends Error {
     constructor(reason: string) {
@@ -22,7 +22,6 @@ export class ToolCallGuard {
     private totalCalls = 0;
     private readonly callCounts = new Map<string, number>();
 
- 
     register(toolName: string, args: unknown): void {
         this.totalCalls++;
         if (this.totalCalls > MAX_TOOL_CALLS) {
@@ -43,10 +42,38 @@ export class ToolCallGuard {
     }
 }
 
-
 function safeStableStringify(value: unknown): string {
+    const seen = new WeakSet<object>();
+
+    const normalize = (input: unknown): unknown => {
+        if (input === null || typeof input !== "object") {
+            if (typeof input === "bigint") return input.toString();
+            if (typeof input === "number" && !Number.isFinite(input)) return String(input);
+            return input;
+        }
+
+        if (seen.has(input)) {
+            throw new TypeError("Cannot serialize circular tool arguments");
+        }
+        seen.add(input);
+
+        if (Array.isArray(input)) {
+            const normalized = input.map(normalize);
+            seen.delete(input);
+            return normalized;
+        }
+
+        const record = input as Record<string, unknown>;
+        const normalized: Record<string, unknown> = {};
+        for (const key of Object.keys(record).sort()) {
+            normalized[key] = normalize(record[key]);
+        }
+        seen.delete(input);
+        return normalized;
+    };
+
     try {
-        return JSON.stringify(value, Object.keys(value as object).sort());
+        return JSON.stringify(normalize(value));
     } catch {
         return String(value);
     }
