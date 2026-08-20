@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useDialog } from "../providers/dialog";
-import { useDialogSearchList } from "../components/dialog-search-list";
 import { useTheme } from "../providers/theme";
 import { DialogSearchList } from "../components/dialog-search-list";
 import { THEMES } from "../theme";
@@ -45,10 +44,7 @@ export const ThemeDialogContent = () => {
                 theme.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())
             }
             renderItem={(theme, isSelected) => (
-                <text
-                    selectable={false}
-                    fg={isSelected ? "#ffffff" : undefined}
-                >
+                <text selectable={false} fg={isSelected ? "#ffffff" : undefined}>
                     {theme.name === originalThemeRef.current.name ? " • " : "   "}
                     {theme.name}
                 </text>
