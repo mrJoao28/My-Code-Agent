@@ -2,8 +2,8 @@ name: Fix input-bar syntax
 
 on:
   push:
-    paths:
-      - .github/workflows/fix-input-bar.yml
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -37,12 +37,12 @@ jobs:
           path.write_text(content.replace(old, new, 1), encoding="utf-8")
           PY
 
-      - name: Remove temporary workflow and commit fix
+      - name: Commit fix and remove temporary workflow
         shell: bash
         run: |
           rm .github/workflows/fix-input-bar.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add packages/cui/src/components/input-bar.tsx .github/workflows/fix-input-bar.yml
-          git commit -m "fix(cui): correct RefObject generic syntax" || exit 0
+          git add -A
+          git commit -m "fix(cui): correct RefObject generic syntax"
           git push
