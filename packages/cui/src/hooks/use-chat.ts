@@ -84,7 +84,8 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
   const handleStream = useCallback(async (response: ClientResponse<unknown>, activeStream: ActiveStream) => {
     if (!isActiveRequest(activeStream.requestId)) return
     if (!response.ok) {
-      updateMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "error", content: await getErrorMessage(response) }])
+      const content = await getErrorMessage(response)
+      updateMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "error", content }])
       return
     }
     if (!response.body) {

@@ -117,7 +117,7 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
       });
       if (!response.ok) {
         const body = await response.json();
-        throw new Error("error" in body ? body.error : "Could not add model");
+        throw new Error("error" in body && typeof body.error === "string" ? body.error : "Could not add model");
       }
       onCreated(id);
     } catch (e) {
@@ -144,12 +144,12 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
       </box>
       <box flexDirection="column" gap={0.5}>
         <text>Model</text>
-        <textarea ref={modelRef} width="100%" height={1} value={modelName} placeholder="e.g. gpt-4.1" onContentChange={() => setModelName(modelRef.current?.plainText ?? "")} />
+        <textarea ref={modelRef} width="100%" height={1} initialValue={modelName} placeholder="e.g. gpt-4.1" onContentChange={() => setModelName(modelRef.current?.plainText ?? "")} />
       </box>
       {isCloud && (
         <box flexDirection="column" gap={0.5}>
           <text>API key</text>
-          <textarea ref={tokenRef} width="100%" height={1} value={token} placeholder="Required for this cloud model" onContentChange={() => setToken(tokenRef.current?.plainText ?? "")} />
+          <textarea ref={tokenRef} width="100%" height={1} initialValue={token} placeholder="Required for this cloud model" onContentChange={() => setToken(tokenRef.current?.plainText ?? "")} />
           <text attributes={TextAttributes.DIM}>Stored locally in .env. Never returned by the API.</text>
         </box>
       )}
@@ -178,7 +178,7 @@ function ConfigureKeyForm({ model, onConfigured, onCancel }: ConfigureKeyProps) 
       });
       if (!response.ok) {
         const body = await response.json();
-        throw new Error("error" in body ? body.error : "Could not save API key");
+        throw new Error("error" in body && typeof body.error === "string" ? body.error : "Could not save API key");
       }
       onConfigured();
     } catch (e) {
@@ -196,7 +196,7 @@ function ConfigureKeyForm({ model, onConfigured, onCancel }: ConfigureKeyProps) 
       <text attributes={TextAttributes.BOLD}>API key required</text>
       <text>Configure a key before using:</text>
       <text fg={colors.primary}>{model.id}</text>
-      <textarea ref={ref} width="100%" height={1} value={token} placeholder="Paste API key" onContentChange={() => setToken(ref.current?.plainText ?? "")} />
+      <textarea ref={ref} width="100%" height={1} initialValue={token} placeholder="Paste API key" onContentChange={() => setToken(ref.current?.plainText ?? "")} />
       <text attributes={TextAttributes.DIM}>The key is saved locally in .env and never displayed again.</text>
       {error && <text fg={colors.error}>{error}</text>}
       <text attributes={TextAttributes.DIM}>{saving ? "Saving..." : "Enter save · Esc cancel"}</text>

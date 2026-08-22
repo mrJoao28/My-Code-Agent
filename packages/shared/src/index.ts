@@ -5,6 +5,7 @@ export {
     type ModelPricing,
     type SupportedProvider,
     type SupportedChatModel,
+    type SupportedChatModelDefinition,
     type SupportedChatModelId
 } from "./models"
 
@@ -16,4 +17,3 @@ export {
     type MessagePart,
     type ChatStreamEvent,
 } from "./schemas"
-

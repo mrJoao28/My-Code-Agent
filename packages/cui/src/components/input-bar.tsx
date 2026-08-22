@@ -331,7 +331,7 @@ async function getMentionCandidates(
 type FileMentionMenuProps = {
   candidates: MentionCandidate[];
   selectedIndex: number;
-  scrollRef: RefObject<
+  scrollRef: RefObject
     ScrollBoxRenderable | null
   >;
   onSelect: (index: number) => void;
@@ -954,7 +954,7 @@ export function InputBar({
             ref={textareaRef}
             focused={!disabled}
             width={"100%"}
-            value={inputValue}
+            initialValue={inputValue}
             placeholder={
               "Ask anything ... 'Make a million dollar SAS'"
             }
