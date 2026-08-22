@@ -6,7 +6,7 @@ import { toolCallArgsSchema } from "@myagent/shared";
 import { resolveChatModel } from "../lib/models";
 import { buildSystemPrompt } from "../prompts";
 import { createTools, GLOBAL_GENERATION_TIMEOUT_MS, ToolCallGuard, ToolLoopDetectedError } from "./tool-service";
-import { extractFullText, serializeParts } from "./message-service";
+import { extractFullText, serializeParts, touchSession } from "./message-service";
 import { logger } from "../lib/logger";
 
 const MAX_STEPS = 50;
@@ -55,6 +55,7 @@ const tools = cwd ? createTools(cwd, mode, sessionId) : undefined;    const part
                 duration: Math.round(elapsedMs / 1000)
             }
         });
+        await touchSession(sessionId);
     };
 
     try {
@@ -179,6 +180,7 @@ const tools = cwd ? createTools(cwd, mode, sessionId) : undefined;    const part
                 duration: Math.round(elapsedMs / 1000)
             }
         });
+        await touchSession(sessionId);
 
         logger.info(
             {
@@ -219,6 +221,7 @@ const tools = cwd ? createTools(cwd, mode, sessionId) : undefined;    const part
                 mode
             }
         });
+        await touchSession(sessionId);
 
         const errorEvent: ChatStreamEvent = { type: "error", message };
         await stream.writeSSE({ event: "error", data: JSON.stringify(errorEvent) });

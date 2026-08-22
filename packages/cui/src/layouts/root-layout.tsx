@@ -9,17 +9,19 @@ import { PromptConfigProvider } from "../providers/prompt-config";
 export function RootLayout(){
     return (
         <ThemeProvider>
-            <ToastProvider>
-                <KeyboardLayerProvider>
-                    <DialogProvider>
-                        <PromptConfigProvider>
-                   
-                            <Outlet/>
-                      
-                        </PromptConfigProvider>
-                    </DialogProvider>
-                </KeyboardLayerProvider>
-            </ToastProvider>
+            <ThemeRoot>
+                <ToastProvider>
+                    <KeyboardLayerProvider>
+                        <DialogProvider>
+                            <PromptConfigProvider>
+
+                                <Outlet/>
+
+                            </PromptConfigProvider>
+                        </DialogProvider>
+                    </KeyboardLayerProvider>
+                </ToastProvider>
+            </ThemeRoot>
         </ThemeProvider>
     )
 }

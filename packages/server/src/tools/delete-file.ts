@@ -17,6 +17,19 @@ export function createDeleteFileTool(cwd: string) {
         execute: async ({ path, recursive }) => {
             const resolvedPath = await resolveSafePath(cwd, path);
 
+            // BUGFIX: nada impedia que `path` resolvesse para o próprio
+            // diretório de trabalho da sessão (ex.: path="." ou path=""
+            // com recursive=true), o que apagaria o projeto inteiro —
+            // inclusive o repositório git. A tool `bash` já bloqueia o
+            // comando `rm` justamente por ser destrutivo demais; a tool
+            // dedicada de deleção tinha o mesmo risco sem nenhuma trava.
+            const root = await resolveSafePath(cwd, ".");
+            if (resolvedPath === root) {
+                throw new Error(
+                    'Não é permitido apagar o diretório de trabalho raiz da sessão. Especifique um arquivo ou subpasta específica em vez de "." ou do próprio cwd.'
+                );
+            }
+
             await rm(resolvedPath, { recursive: recursive ?? false, force: false });
 
             return {

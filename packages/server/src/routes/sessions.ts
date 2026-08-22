@@ -26,7 +26,12 @@ const createSessionValidator = zValidator("json", createSessionSchema, (result, 
 const app = new Hono()
   .get("/", async (c) => {
     const sessions = await db.session.findMany({
-      orderBy: { createdAt: "desc" },
+      // BUGFIX: estava ordenado por `createdAt`, então uma sessão em que
+      // o usuário acabou de conversar não subia para o topo da lista.
+      // `updatedAt` agora é atualizado a cada mensagem (ver touchSession
+      // em message-service.ts), então ordenar por ele reflete a
+      // atividade recente de verdade.
+      orderBy: { updatedAt: "desc" },
       select: { id: true, title: true, createdAt: true },
     });
     return c.json(sessions);

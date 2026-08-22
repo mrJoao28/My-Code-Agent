@@ -33,7 +33,7 @@ export const AgentsDialogContent = ({currentMode, onSelectMode}:AgentsDialogCont
         filterFn={(item,query)=>getModeLabel(item).toLocaleLowerCase().includes(query.toLocaleLowerCase())}
        renderItem={(item,isSelected)=>(
         <text selectable={false} fg={isSelected ? "black" : "white"}>
-            {item===currentMode?"🟡": "   "}
+            {item===currentMode?"🟡 ": "   "}{getModeLabel(item)}
         </text>
        )}
         getKey={(t)=>t}

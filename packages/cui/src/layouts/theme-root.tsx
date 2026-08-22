@@ -9,7 +9,7 @@ export function ThemeRoot({children}:Props){
   const {colors} = useTheme();
   return(
     <box   
-    backgroundColor={colors.backgorund}
+    backgroundColor={colors.background}
     width={"100%"}
     height={"100%"}
     flexGrow={1}

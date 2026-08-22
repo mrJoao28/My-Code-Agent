@@ -4,7 +4,7 @@ import { db } from "@myagent/database";
 import { Mode, MessageStatus } from "@myagent/database";
 import type { ChatStreamEvent } from "@myagent/shared";
 import { isModelConfigured, isSupportedChatModel } from "../lib/models";
-import { buildConversationHistory, getResumableUserMessage } from "./message-service";
+import { buildConversationHistory, getResumableUserMessage, touchSession } from "./message-service";
 import { streamAIResponse } from "./stream-service";
 import { logger } from "../lib/logger";
 
@@ -53,27 +53,49 @@ export async function handleResume(c: Context) {
 
 export async function handleSubmit(c: Context, data: SubmitBody) {
   const sessionId = c.req.param("sessionId");
+
+  // BUGFIX: o lock precisa ser adquirido de forma síncrona, ANTES de
+  // qualquer `await`. Antes, o `activeResumeSessionIds.add(sessionId)`
+  // só acontecia depois de duas operações assíncronas (findUnique +
+  // message.create), então duas requisições concorrentes para a mesma
+  // sessão passavam ambas pelo `if (activeResumeSessionIds.has(...))`
+  // antes de qualquer uma travar o lock, resultando em duas gerações
+  // de IA rodando ao mesmo tempo na mesma sessão — violando a garantia
+  // de "uma sessão não pode ter gerações concorrentes" que o restante
+  // do sistema assume (ver `handleResume`, que já fazia isso certo).
   if (activeResumeSessionIds.has(sessionId)) return c.json({ error: "Session already has an active generation" }, 409);
-
-  const session = await db.session.findUnique({ where: { id: sessionId }, include: { messages: { orderBy: { createdAt: "asc" } } } });
-  if (!session) return c.json({ error: "Session not found" }, 404);
-
-  await db.message.create({ data: { sessionId, role: "USER", status: MessageStatus.COMPLETE, model: data.model, content: data.content, mode: data.mode } });
-  const history = buildConversationHistory([...session.messages, { role: "USER" as const, content: data.content, status: MessageStatus.COMPLETE }]);
-  const abortController = new AbortController();
   activeResumeSessionIds.add(sessionId);
 
-  return streamSSE(c, async (stream) => {
-    stream.onAbort(() => abortController.abort());
-    try {
-      await streamAIResponse(stream, { sessionId, model: data.model, history, mode: data.mode, abortController, cwd: session.cwd });
-    } finally {
+  try {
+    const session = await db.session.findUnique({ where: { id: sessionId }, include: { messages: { orderBy: { createdAt: "asc" } } } });
+    if (!session) {
       activeResumeSessionIds.delete(sessionId);
+      return c.json({ error: "Session not found" }, 404);
     }
-  }, async (err, stream) => {
+
+    await db.message.create({ data: { sessionId, role: "USER", status: MessageStatus.COMPLETE, model: data.model, content: data.content, mode: data.mode } });
+    // BUGFIX: `Session.updatedAt` nunca era tocado, então a sessão não
+    // subia na listagem (ordenada por atividade recente) assim que o
+    // usuário mandava uma nova mensagem. Veja touchSession em message-service.ts.
+    await touchSession(sessionId);
+    const history = buildConversationHistory([...session.messages, { role: "USER" as const, content: data.content, status: MessageStatus.COMPLETE }]);
+    const abortController = new AbortController();
+
+    return streamSSE(c, async (stream) => {
+      stream.onAbort(() => abortController.abort());
+      try {
+        await streamAIResponse(stream, { sessionId, model: data.model, history, mode: data.mode, abortController, cwd: session.cwd });
+      } finally {
+        activeResumeSessionIds.delete(sessionId);
+      }
+    }, async (err, stream) => {
+      activeResumeSessionIds.delete(sessionId);
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error({ sessionId, event: "submit_stream_error", err: message }, "Submit stream failed");
+      await writeSseError(stream, message);
+    });
+  } catch (e) {
     activeResumeSessionIds.delete(sessionId);
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error({ sessionId, event: "submit_stream_error", err: message }, "Submit stream failed");
-    await writeSseError(stream, message);
-  });
+    throw e;
+  }
 }
