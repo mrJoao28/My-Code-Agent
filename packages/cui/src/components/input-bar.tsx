@@ -331,7 +331,7 @@ async function getMentionCandidates(
 type FileMentionMenuProps = {
   candidates: MentionCandidate[];
   selectedIndex: number;
-  scrollRef: RefObject
+  scrollRef: RefObject<
     ScrollBoxRenderable | null
   >;
   onSelect: (index: number) => void;
