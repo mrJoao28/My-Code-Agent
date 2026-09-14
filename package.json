@@ -1,10 +1,13 @@
 {
   "name": "my-agent",
   "version": "1.0.0",
+  "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
-   "dev:cli": "bun --env-file=.env --watch packages/cui/src/index.tsx",
-    "dev:server": "bun run --hot packages/server/src/index.ts"
+    "dev:cli": "bun --env-file=.env --watch packages/cui/src/index.tsx",
+    "dev:server": "bun run --hot packages/server/src/index.ts",
+    "test": "bun test",
+    "test:watch": "bun test --watch"
   },
   "dependencies": {
     "hono": "^4.12.32"

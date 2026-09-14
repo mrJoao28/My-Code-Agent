@@ -1,1 +1,0 @@
-Trigger GitHub Actions to apply the pending input-bar.tsx syntax repair.

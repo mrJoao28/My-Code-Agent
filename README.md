@@ -8,14 +8,7 @@ My-Code-Agent is an AI coding assistant that runs directly in the terminal. It c
 
 ### 🤖 Multi-provider AI
 
-The project has a provider resolver that supports:
-
-- **Anthropic** — Claude Sonnet 4.6, Claude Haiku 4.5 and Claude Opus 4.6
-- **OpenAI** — GPT-5.4, GPT-5.4 Mini and GPT-5.4 Nano
-- **Google** — Gemini 3 Pro, Gemini 3.6 Flash and Gemini 3.5 Flash Lite
-- **Ollama** — Llama 3.1, Qwen 2.5 Coder, DeepSeek R1 and Llama 3.2 1B
-
-Models are centrally registered in `packages/shared/src/models.ts`, including provider and pricing metadata. The default model is `claude-opus-4-6`.
+The project has a provider resolver that supports multiple Anthropic, OpenAI, Google and Ollama models. Models are centrally registered in `packages/shared/src/models.ts`, including provider and pricing metadata.
 
 ### 💬 Interactive coding sessions
 
@@ -30,54 +23,17 @@ Models are centrally registered in `packages/shared/src/models.ts`, including pr
 
 AI responses are streamed to the terminal using **Server-Sent Events (SSE)**.
 
-The stream can expose:
-
-- Reasoning deltas
-- Text deltas
-- Tool calls
-- Tool results
-- Completion events
-- Error events
-
-The client can interrupt an active generation with `Esc`.
+The stream can expose reasoning deltas, text deltas, tool calls, tool results, completion events and error events. The client can interrupt an active generation with `Esc`.
 
 ### 🛠️ Coding tools
 
-The agent exposes tools according to the selected mode:
+**Read-only tools:** `read_file`, `list_directory`, `glob`, `grep`, `web_search`, `web_fetch`, `git_status`, `git_diff`, `git_log`, `type_check` and `todo_write`.
 
-**Read-only tools:**
-
-- `read_file` — read files
-- `list_directory` — inspect directories
-- `glob` — find files using patterns
-- `grep` — search through project contents
-- `web_search` — search the web
-- `web_fetch` — retrieve web content
-- `git_status` — inspect Git status
-- `git_diff` — inspect changes
-- `git_log` — inspect Git history
-- `type_check` — run type checking
-- `todo_write` — maintain session tasks
-
-**BUILD-only tools:**
-
-- `write_file` — create/write files
-- `edit_file` — edit existing files
-- `delete_file` — remove files
-- `move_file` — move/rename files
-- `apply_patch` — apply patches
-- `bash` — execute shell commands in the configured working directory
-- `git_commit` — create Git commits
+**BUILD-only tools:** `write_file`, `edit_file`, `delete_file`, `move_file`, `apply_patch`, `bash` and `git_commit`.
 
 ### 🧭 PLAN and BUILD modes
 
-#### PLAN
-
-Designed for analysis and planning. The agent receives only read-oriented tools and cannot directly modify the project through the coding tools.
-
-#### BUILD
-
-Designed for implementation. In addition to the read-only tools, the agent can modify files, execute commands and create Git commits.
+**PLAN** is designed for analysis and planning and exposes only read-oriented coding tools. **BUILD** adds file modification, shell execution and Git commit tools.
 
 The system prompt is generated dynamically according to the selected mode and working directory.
 
@@ -96,26 +52,11 @@ If a generation is interrupted, its partial response can be persisted with `INTE
 
 ### 🧩 Runtime validation
 
-Zod is used across the API and shared package to validate:
-
-- Chat requests
-- Session creation requests
-- Supported models
-- Tool-call arguments
-- Message parts
-- SSE chat events
+Zod is used across the API and shared package to validate chat requests, session creation requests, supported models, tool-call arguments, message parts and SSE chat events.
 
 ### 🖥️ Terminal UI
 
-The CLI is built with **React + OpenTUI** and uses React Router for navigation.
-
-Current screens/routes:
-
-- `/` — Home
-- `/sessions/new` — New session flow
-- `/sessions/:id` — Interactive coding session
-
-The session UI includes message rendering, streaming state, model/mode information, duration display, error messages, toast notifications and keyboard handling.
+The CLI is built with **React + OpenTUI** and uses React Router for navigation. Current screens/routes are `/`, `/sessions/new` and `/sessions/:id`.
 
 ---
 
@@ -134,125 +75,7 @@ My-Code-Agent/
     └── shared/       # Shared models, schemas and types
 ```
 
-### `packages/cui`
-
-Terminal client responsible for rendering the application and interacting with the API.
-
-```text
-packages/cui/
-├── package.json
-└── src/
-    ├── index.tsx
-    ├── components/
-    ├── hooks/
-    ├── layouts/
-    ├── lib/
-    ├── providers/
-    └── screens/
-        ├── home.tsx
-        ├── new-session.tsx
-        └── session.tsx
-```
-
-The entry point creates the OpenTUI renderer and mounts the React application. React Router provides the terminal navigation.
-
-### `packages/server`
-
-Backend responsible for API routes, AI model resolution, streaming, prompts, tool orchestration and logging.
-
-```text
-packages/server/
-├── package.json
-└── src/
-    ├── index.ts
-    ├── lib/
-    │   ├── logger.ts
-    │   ├── models.ts
-    │   └── providers/
-    │       ├── anthropic.ts
-    │       ├── google.ts
-    │       ├── ollama.ts
-    │       ├── openai.ts
-    │       └── resolver.ts
-    ├── prompts/
-    │   ├── index.ts
-    │   ├── system.ts
-    │   ├── coding.ts
-    │   ├── editing.ts
-    │   └── tool-rules.ts
-    ├── routes/
-    │   ├── chat.ts
-    │   └── sessions.ts
-    ├── services/
-    │   ├── chat-service.ts
-    │   ├── message-service.ts
-    │   ├── stream-service.ts
-    │   └── tool-service.ts
-    └── tools/
-        ├── index.ts
-        ├── bash.ts
-        ├── read-file.ts
-        ├── write-file.ts
-        ├── edit-file.ts
-        ├── delete-file.ts
-        ├── move-file.ts
-        ├── apply-patch.ts
-        ├── list-directory.ts
-        ├── glob.ts
-        ├── grep.ts
-        ├── web-search.ts
-        ├── web-fetch.ts
-        ├── git-status.ts
-        ├── git-diff.ts
-        ├── git-log.ts
-        ├── git-commit.ts
-        ├── type-check.ts
-        └── todo-write.ts
-```
-
-### `packages/database`
-
-Prisma data layer backed by PostgreSQL.
-
-```text
-packages/database/
-├── package.json
-├── prisma/
-│   └── schema.prisma
-└── src/
-    ├── index.ts
-    └── enums.ts
-```
-
-The database contains:
-
-- `Session`
-- `Message`
-
-with enums for:
-
-- `Role`: `USER`, `ASSISTANT`, `ERROR`
-- `Mode`: `BUILD`, `PLAN`
-- `MessageStatus`: `COMPLETE`, `INTERRUPTED`
-
-### `packages/shared`
-
-Shared TypeScript definitions and validation schemas used by both client and server.
-
-```text
-packages/shared/
-├── package.json
-└── src/
-    ├── index.ts
-    ├── models.ts
-    └── schemas.ts
-```
-
----
-
-## 🔄 Request flow
-
-A typical message follows this flow:
+### Request flow
 
 ```text
 Terminal UI
@@ -262,7 +85,6 @@ Terminal UI
 Hono API
     │
     ├── Validate request with Zod
-    │
     ▼
 Chat Service
     │
@@ -270,15 +92,12 @@ Chat Service
     ├── Resolve selected AI model
     ├── Build system prompt
     ├── Create tools according to PLAN/BUILD
-    │
     ▼
 AI SDK
     │
-    ├── Stream reasoning
-    ├── Stream text
+    ├── Stream reasoning/text
     ├── Execute tools
     └── Stream tool results
-    │
     ▼
 SSE → Terminal UI
     │
@@ -294,52 +113,14 @@ The server runs on port **3000**.
 
 ### Sessions
 
-#### `GET /session`
-
-Returns sessions ordered by creation date.
-
-#### `GET /session/:id`
-
-Returns a session and its messages.
-
-#### `POST /session`
-
-Creates a new session. The request can include an initial message.
-
-Example:
-
-```json
-{
-  "title": "Fix authentication bug",
-  "cwd": "/path/to/project",
-  "initialMessage": {
-    "role": "USER",
-    "content": "Find and fix the authentication bug",
-    "mode": "BUILD",
-    "model": "gpt-5.4"
-  }
-}
-```
+- `GET /session` — returns sessions ordered by most recent activity.
+- `GET /session/:id` — returns a session and its messages.
+- `POST /session` — creates a new session and optionally an initial message.
 
 ### Chat
 
-#### `POST /chat/:sessionId`
-
-Submits a user message and starts an SSE AI generation.
-
-Request body:
-
-```json
-{
-  "content": "Explain this error and fix it",
-  "mode": "BUILD",
-  "model": "gpt-5.4"
-}
-```
-
-#### `POST /chat/:sessionId/resume`
-
-Attempts to resume a session containing a pending/resumable user message.
+- `POST /chat/:sessionId` — submits a user message and starts an SSE AI generation.
+- `POST /chat/:sessionId/resume` — attempts to resume a session containing a pending/resumable user message.
 
 ---
 
@@ -347,27 +128,27 @@ Attempts to resume a session containing a pending/resumable user message.
 
 Before running the project, install:
 
-- [Bun](https://bun.sh/)
-- Node.js-compatible tooling as required by your environment
+- Bun
 - PostgreSQL
 - An API key for the cloud provider you intend to use, or Ollama for local models
 
 The repository is a Bun workspace, so dependencies are managed from the root.
 
+Copy `.env.example` to `.env` and configure the values you need. Cloud model keys follow the naming convention generated by `packages/server/src/lib/model-registry.ts`.
+
+### Ollama
+
+For local models, Ollama is configured by default against `http://localhost:11434/v1` and can be overridden with `OLLAMA_BASE_URL` and `OLLAMA_API_KEY`.
+
 ---
 
 ## 🚀 Installation
 
-Clone the repository:
+Clone the repository and install dependencies:
 
 ```bash
 git clone https://github.com/mrJoao28/My-Code-Agent.git
 cd My-Code-Agent
-```
-
-Install dependencies:
-
-```bash
 bun install
 ```
 
@@ -377,28 +158,13 @@ Generate the Prisma client:
 bun run --cwd packages/database db.generate
 ```
 
-Configure your PostgreSQL connection and provider credentials in your environment before starting the server.
+Copy the environment template and configure PostgreSQL/provider credentials:
 
-### Ollama
-
-For local models, Ollama is configured by default against:
-
-```text
-http://localhost:11434/v1
+```bash
+cp .env.example .env
 ```
 
-You can override this with:
-
-```env
-OLLAMA_BASE_URL=http://localhost:11434/v1
-OLLAMA_API_KEY=ollama
-```
-
-Make sure the model names registered by `packages/shared/src/models.ts` are available in your Ollama installation.
-
----
-
-## ▶️ Running
+### Running
 
 Start the backend:
 
@@ -406,140 +172,44 @@ Start the backend:
 bun run dev:server
 ```
 
-The API will be available at:
-
-```text
-http://localhost:3000
-```
-
-Start the terminal UI in another terminal:
+Start the terminal client in another terminal:
 
 ```bash
 bun run dev:cli
 ```
 
-The root `package.json` provides these development scripts:
-
-```text
-bun run dev:server
-bun run dev:cli
-```
-
-The CLI uses Bun's environment-file support and watches the terminal application for changes.
-
----
-
-## 🗄️ Database commands
-
-From the database workspace:
+Run the test suite:
 
 ```bash
-bun run --cwd packages/database db.generate
-bun run --cwd packages/database db.migrate
-bun run --cwd packages/database db.push
-bun run --cwd packages/database db.studio
+bun test
 ```
 
-- `db.generate` — generate Prisma Client
-- `db.migrate` — create/apply a development migration
-- `db.push` — synchronize the Prisma schema with the database
-- `db.studio` — open Prisma Studio
-
 ---
 
-## 🔐 Environment variables
+## 🧪 Quality checks
 
-The exact cloud-provider environment variables are supplied by the corresponding AI SDK providers. Configure the credentials required by the provider you choose.
+The repository includes automated unit coverage for core tool-loop protection. Before opening a pull request, run:
 
-For Ollama, the project explicitly reads:
-
-```env
-OLLAMA_BASE_URL=http://localhost:11434/v1
-OLLAMA_API_KEY=ollama
+```bash
+bun test
 ```
 
-PostgreSQL configuration is required by Prisma. Keep secrets in a local `.env` file and **never commit API keys or database credentials**.
+---
 
-> Note: the current session route uses `userId: "mock-user"`; authentication infrastructure is present in the server dependencies, but session creation currently uses this mock user value.
+## 🧱 Database
+
+The Prisma data layer contains `Session` and `Message` entities. Sessions track `createdAt` and `updatedAt`; messages track role, status, model, mode, content, structured parts and generation duration.
 
 ---
 
-## 🧠 AI provider architecture
+## 🔐 Security notes
 
-Providers are resolved through a common interface instead of being hard-coded into the chat service:
+BUILD mode can execute shell commands and modify files inside the configured working directory. The shell tool applies command restrictions, timeouts, output limits and process-group termination. File tools resolve paths against the configured working directory and reject paths that escape it.
 
-```text
-model ID
-   │
-   ▼
-findSupportedChatModel()
-   │
-   ▼
-resolveChatModel()
-   │
-   ├── Anthropic
-   ├── OpenAI
-   ├── Google
-   └── Ollama
-```
-
-This makes adding a new provider/model straightforward: register the model in `packages/shared/src/models.ts` and implement the provider resolution logic when necessary.
-
----
-
-## 🧪 Error handling and observability
-
-The Hono server includes centralized error handling and structured logging.
-
-Each request receives a generated request ID and records:
-
-- HTTP method
-- Request path
-- HTTP status
-- Request duration
-- Request ID
-
-Unhandled errors are logged and returned as structured JSON responses.
-
-AI generation errors are also persisted as `ERROR` messages and emitted through the SSE stream.
-
----
-
-## 🧱 Main technologies
-
-| Technology | Purpose |
-|---|---|
-| **Bun** | Runtime, package manager and workspace tooling |
-| **TypeScript** | Application language |
-| **React 19** | Terminal UI architecture |
-| **OpenTUI** | Terminal rendering |
-| **React Router** | CLI navigation |
-| **Hono** | HTTP API |
-| **Vercel AI SDK** | AI streaming and tool execution |
-| **Zod** | Runtime validation |
-| **Prisma** | Database ORM |
-| **PostgreSQL** | Persistent storage |
-| **Pino** | Structured logging |
-| **date-fns / pretty-ms** | Time and duration formatting |
+This project is intended for trusted local development environments. Authentication and persistent multi-user authorization are not yet wired into the API, so it should not be exposed as a public multi-user service without adding authentication and authorization.
 
 ---
 
 ## 📌 Project status
 
-My-Code-Agent is an actively evolving project. The architecture is already split into clear client, server, database and shared layers, making it suitable for extending with additional models, tools, authentication, UI components and agent capabilities.
-
----
-
-## 📄 License
-
-No license is currently specified in the repository. If you intend to distribute or accept external contributions, consider adding an appropriate open-source license.
-
----
-
-## 👤 Author
-
-**Joao Azevedo**
-
-GitHub: [@mrJoao28](https://github.com/mrJoao28)
-
-Repository: https://github.com/mrJoao28/My-Code-Agent
+My-Code-Agent is actively evolving. The architecture intentionally separates the terminal client, API/orchestration layer, persistence and shared contracts so each area can evolve independently.
