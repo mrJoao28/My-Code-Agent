@@ -7,6 +7,9 @@ export type ResolvedModel = {
   provider: SupportedProvider;
   modelId: string;
   providerOptions?: ProviderOptions;
+  toolOptions?: ProviderOptions;
+  maxRetries?: number;
+  abortSignal?: AbortSignal;
 };
 
 export function assertUnsupportedProvider(provider: never): never {

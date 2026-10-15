@@ -3,11 +3,12 @@ export type ModelPricing = {
   outputUsdPerMillionTokens: number;
 };
 
-export type SupportedProvider = "anthropic" | "openai" | "google" | "ollama";
+export type SupportedProvider = "anthropic" | "openai" | "google" | "ollama" | "chatgpt";
 
 export type SupportedChatModelDefinition = {
   id: string;
   provider: SupportedProvider;
+  displayName?: string;
   pricing: ModelPricing;
 };
 

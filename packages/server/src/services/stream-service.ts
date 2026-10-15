@@ -72,16 +72,29 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
         await touchSession(sessionId);
     };
 
+    let detachProviderAbort: (() => void) | undefined;
     try {
         const resolvedModel = (dependencies.resolveModel ?? resolveChatModel)(model);
+        if (resolvedModel.abortSignal) {
+            const providerSignal = resolvedModel.abortSignal;
+            const abort = () => abortController.abort(providerSignal.reason);
+            providerSignal.addEventListener("abort", abort, { once: true });
+            detachProviderAbort = () => providerSignal.removeEventListener("abort", abort);
+            if (providerSignal.aborted) abort();
+        }
+        const configuredTools = tools && resolvedModel.toolOptions
+            ? Object.fromEntries(Object.entries(tools).map(([name, definition]) => [name, { ...definition, providerOptions: resolvedModel.toolOptions }]))
+            : tools;
         const result = (dependencies.generate ?? aiStreamText)({
             model: resolvedModel.model,
             system: buildSystemPrompt({ cwd: cwd ?? "", mode }),
-            tools,
+            tools: configuredTools,
             stopWhen: tools ? stepCountIs(MAX_STEPS) : undefined,
             messages: history,
             abortSignal: abortController.signal,
-            providerOptions: resolvedModel.providerOptions
+            providerOptions: resolvedModel.providerOptions,
+            maxRetries: resolvedModel.maxRetries,
+            onError: () => {}, // O fullStream abaixo já trata e registra os erros.
         });
 
         for await (const part of result.fullStream) {
@@ -243,6 +256,7 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
         const errorEvent: ChatStreamEvent = { type: "error", message };
         await stream.writeSSE({ event: "error", data: JSON.stringify(errorEvent) });
     } finally {
+        detachProviderAbort?.();
         clearTimeout(globalTimeout);
     }
 }

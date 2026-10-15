@@ -6,15 +6,16 @@ import { useTheme } from "../providers/theme";
 import { DialogSearchList } from "../components/dialog-search-list";
 import { appClient } from "../lib/api-client";
 import type { SupportedProvider } from "@myagent/shared";
+import { ChatGPTDialogContent } from "./chatgpt-dialog";
 
-type Model = { id: string; provider: SupportedProvider; configured: boolean };
+type Model = { id: string; displayName?: string; provider: SupportedProvider; configured: boolean };
 type Props = { onSelectModel: (modelId: string) => void };
 
-const PROVIDERS: { id: SupportedProvider; label: string; kind: "Cloud" | "Local" }[] = [
+const PROVIDERS: { id: Exclude<SupportedProvider, "chatgpt">; label: string; kind: "Cloud" | "Local" }[] = [
+  { id: "ollama", label: "Ollama", kind: "Local" },
   { id: "anthropic", label: "Anthropic", kind: "Cloud" },
   { id: "openai", label: "OpenAI", kind: "Cloud" },
   { id: "google", label: "Google", kind: "Cloud" },
-  { id: "ollama", label: "Ollama", kind: "Local" },
 ];
 
 export const ModelDialogContent = ({ onSelectModel }: Props) => {
@@ -22,6 +23,7 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
   const [models, setModels] = useState<Model[]>([]);
   const [adding, setAdding] = useState(false);
   const [configuring, setConfiguring] = useState<Model | null>(null);
+  const [connecting, setConnecting] = useState(false);
 
   const loadModels = useCallback(async () => {
     try {
@@ -35,6 +37,7 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
   useEffect(() => { void loadModels(); }, [loadModels]);
 
   const select = useCallback((model: Model) => {
+    if (model.provider === "chatgpt" && !model.configured) { setConnecting(true); return; }
     if (model.provider !== "ollama" && !model.configured) {
       setConfiguring(model);
       return;
@@ -42,6 +45,8 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
     onSelectModel(model.id);
     dialog.close();
   }, [dialog, onSelectModel]);
+
+  if (connecting) return <ChatGPTDialogContent onBack={() => { setConnecting(false); void loadModels(); }} onConnected={() => { setConnecting(false); void loadModels(); }} />;
 
   if (adding) {
     return (
@@ -63,21 +68,22 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
   }
 
   const addItem: Model = { id: "__add_model__", provider: "ollama", configured: true };
-  const items = [addItem, ...models];
+  const connectItem: Model = { id: "__chatgpt__", provider: "chatgpt", configured: true };
+  const items = [connectItem, addItem, ...models];
 
   return (
     <DialogSearchList
       items={items}
-      onSelect={(item) => item.id === addItem.id ? setAdding(true) : select(item)}
-      filterFn={(item, query) => item.id === addItem.id || item.id.toLowerCase().includes(query.toLowerCase())}
+      onSelect={(item) => item.id === connectItem.id ? setConnecting(true) : item.id === addItem.id ? setAdding(true) : select(item)}
+      filterFn={(item, query) => item.id === addItem.id || item.id === connectItem.id || `${item.id} ${item.displayName ?? ""}`.toLowerCase().includes(query.toLowerCase())}
       renderItem={(item, selected) => (
         <box flexDirection="row" justifyContent="space-between" width="100%">
           <text fg={selected ? "black" : undefined}>
-            {item.id === addItem.id ? "+ Add model" : item.id}
+            {item.id === connectItem.id ? "Continuar com ChatGPT / gerenciar contas" : item.id === addItem.id ? "+ Adicionar modelo local / API key" : item.displayName ?? item.id}
           </text>
-          {item.id !== addItem.id && (
+          {item.id !== addItem.id && item.id !== connectItem.id && (
             <text attributes={TextAttributes.DIM}>
-              {item.provider === "ollama" ? "local" : item.configured ? "ready" : "API key required"}
+              {item.provider === "chatgpt" ? "plano ChatGPT" : item.provider === "ollama" ? "local" : item.configured ? "ready" : "API key required"}
             </text>
           )}
         </box>
@@ -98,6 +104,7 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [field, setField] = useState<"model" | "token">("model");
   const modelRef = useRef<TextareaRenderable>(null);
   const tokenRef = useRef<TextareaRenderable>(null);
   const provider = PROVIDERS[providerIndex]!;
@@ -127,9 +134,11 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
 
   useKeyboard((key) => {
     if (key.name === "escape") { key.preventDefault(); onCancel(); return; }
+    if (key.name === "tab" && isCloud) { key.preventDefault(); setField(value => value === "model" ? "token" : "model"); return; }
     if (key.name === "left" || key.name === "right") {
       const delta = key.name === "left" ? -1 : 1;
       setProviderIndex(i => (i + delta + PROVIDERS.length) % PROVIDERS.length);
+      setField("model");
       return;
     }
     if ((key.name === "return" || key.name === "enter") && !key.shift) { key.preventDefault(); void submit(); }
@@ -144,17 +153,17 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
       </box>
       <box flexDirection="column" gap={0.5}>
         <text>Model</text>
-        <textarea ref={modelRef} width="100%" height={1} initialValue={modelName} placeholder="e.g. gpt-4.1" onContentChange={() => setModelName(modelRef.current?.plainText ?? "")} />
+        <textarea ref={modelRef} focused={field === "model"} width="100%" height={1} initialValue={modelName} placeholder={isCloud ? "e.g. gpt-4.1" : "ex.: qwen2.5-coder:7b"} onContentChange={() => setModelName(modelRef.current?.plainText ?? "")} />
       </box>
       {isCloud && (
         <box flexDirection="column" gap={0.5}>
           <text>API key</text>
-          <textarea ref={tokenRef} width="100%" height={1} initialValue={token} placeholder="Required for this cloud model" onContentChange={() => setToken(tokenRef.current?.plainText ?? "")} />
+          <textarea ref={tokenRef} focused={field === "token"} width="100%" height={1} initialValue={token} placeholder="Required for this cloud model" onContentChange={() => setToken(tokenRef.current?.plainText ?? "")} />
           <text attributes={TextAttributes.DIM}>Stored locally in .env. Never returned by the API.</text>
         </box>
       )}
       {error && <text fg={colors.error}>{error}</text>}
-      <text attributes={TextAttributes.DIM}>{saving ? "Saving..." : "Enter save · Esc cancel"}</text>
+      <text attributes={TextAttributes.DIM}>{saving ? "Saving..." : "Enter save · Tab field · Esc cancel"}</text>
     </box>
   );
 }
@@ -196,7 +205,7 @@ function ConfigureKeyForm({ model, onConfigured, onCancel }: ConfigureKeyProps) 
       <text attributes={TextAttributes.BOLD}>API key required</text>
       <text>Configure a key before using:</text>
       <text fg={colors.primary}>{model.id}</text>
-      <textarea ref={ref} width="100%" height={1} initialValue={token} placeholder="Paste API key" onContentChange={() => setToken(ref.current?.plainText ?? "")} />
+      <textarea ref={ref} focused width="100%" height={1} initialValue={token} placeholder="Paste API key" onContentChange={() => setToken(ref.current?.plainText ?? "")} />
       <text attributes={TextAttributes.DIM}>The key is saved locally in .env and never displayed again.</text>
       {error && <text fg={colors.error}>{error}</text>}
       <text attributes={TextAttributes.DIM}>{saving ? "Saving..." : "Enter save · Esc cancel"}</text>

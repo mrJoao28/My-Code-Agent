@@ -139,6 +139,8 @@ Copy `.env.example` to `.env` and configure the values you need. Cloud model key
 
 ### Ollama
 
+Para conectar um plano ChatGPT pelo navegador ou cadastrar modelos locais, veja [ChatGPT e modelos locais](docs/CHATGPT_E_MODELOS_LOCAIS.md).
+
 For local models, Ollama is configured by default against `http://localhost:11434/v1` and can be overridden with `OLLAMA_BASE_URL` and `OLLAMA_API_KEY`.
 
 ---

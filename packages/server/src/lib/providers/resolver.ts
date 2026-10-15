@@ -4,6 +4,7 @@ import { resolveAnthropicModel } from "./anthropic";
 import { resolveOpenAIModel } from "./openai";
 import { resolveGoogleModel } from "./google";
 import { resolveOllamaModel } from "./ollama";
+import { resolveChatGPTModel } from "./chatgpt";
 import { assertUnsupportedProvider, type ResolvedModel } from "./registry";
 
 export type { ResolvedModel } from "./registry";
@@ -14,6 +15,8 @@ function resolveSupportedModel(
   apiKey?: string,
 ): ResolvedModel {
   switch (provider) {
+    case "chatgpt":
+      return resolveChatGPTModel(modelId);
     case "anthropic":
       return resolveAnthropicModel(modelId, apiKey);
     case "openai":
@@ -40,7 +43,7 @@ export function resolveChatModel(modelId: string): ResolvedModel {
   const apiKeyEnv = getModelApiKeyEnv(model);
   const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : undefined;
 
-  if (model.provider !== "ollama" && !apiKey) {
+  if (model.provider !== "ollama" && model.provider !== "chatgpt" && !apiKey) {
     throw new Error(`Missing API token for model: ${modelId}`);
   }
 

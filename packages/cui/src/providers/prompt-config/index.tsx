@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import { DEFAULT_CHAT_MODEL_ID, type SupportedChatModelId } from "@myagent/shared";
-import { Mode } from "../../../../database/generated/prisma/enums";
+import { Mode } from "@myagent/database/enums";
 
 type PromptConfigContextValue = {
   mode: Mode;

@@ -62,3 +62,18 @@ test("model-resolution failure is handled inside the generation lifecycle", asyn
     await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
     expect(fixture.created[0]).toMatchObject({ role: "ERROR", content: "unsupported fixture model" });
 });
+
+test("provider account cancellation reaches the generation and preserves partial output as interrupted", async () => {
+    const fixture = setup([]);
+    const connection = new AbortController();
+    fixture.dependencies.resolveModel = (() => ({ model: {}, provider: "ollama", modelId: "fixture", abortSignal: connection.signal })) as unknown as StreamDependencies["resolveModel"];
+    fixture.dependencies.generate = (() => ({ fullStream: (async function* () {
+        yield { type: "text-delta", text: "partial" };
+        connection.abort();
+    })() })) as unknown as StreamDependencies["generate"];
+    await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+    expect(fixture.params.abortController.signal.aborted).toBe(true);
+    expect(fixture.created).toHaveLength(1);
+    expect(fixture.created[0]).toMatchObject({ role: "ASSISTANT", status: "INTERRUPTED", content: "partial" });
+    expect(fixture.events.some(event => event.event === "done")).toBe(false);
+});

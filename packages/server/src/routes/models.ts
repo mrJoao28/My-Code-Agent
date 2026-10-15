@@ -73,6 +73,7 @@ const app = new Hono()
     if (model.provider === "ollama") {
       return c.json({ error: "Local Ollama models do not require an API key" }, 400);
     }
+    if (model.provider === "chatgpt") return c.json({ error: "Conecte a conta ChatGPT; esse modelo não usa API key." }, 400);
 
     const envKey = getModelApiKeyEnv(model);
     if (!envKey) return c.json({ error: "Model API key is not configurable" }, 400);

@@ -9,6 +9,7 @@ import { createPermissionRoutes } from "./routes/permissions";
 import { UnsafePathError, PathNotFoundError } from "./utils/path";
 import chat from "./routes/chat";
 import models from "./routes/models";
+import { createChatGPTRoutes } from "./routes/chatgpt";
 import { logger, generateRequestId } from "./lib/logger";
 
 const app = new Hono<{ Variables: { requestId: string } }>();
@@ -93,6 +94,7 @@ const routes = app
   .route("/session", createSessionRoutes(db))
   .route("/chat", chat)
   .route("/models", models)
+  .route("/chatgpt", createChatGPTRoutes())
   .route("/permissions", createPermissionRoutes());
 
 export type AppType = typeof routes;
