@@ -201,6 +201,8 @@ bun test
 
 The Prisma data layer contains `Session` and `Message` entities. Sessions track `createdAt` and `updatedAt`; messages track role, status, model, mode, content, structured parts and generation duration.
 
+Para subir o PostgreSQL local com Docker, aplicar migrations e executar a integração real, veja [PostgreSQL no Docker](docs/POSTGRES_DOCKER.md). Use `bun run db:up` para iniciar e `bun run test:database` para testar em um banco temporário isolado.
+
 ---
 
 ## 🔐 Security notes
