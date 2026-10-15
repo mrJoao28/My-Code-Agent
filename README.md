@@ -130,6 +130,7 @@ Before running the project, install:
 
 - Bun
 - PostgreSQL
+- Docker Engine/Desktop and a trusted local Linux image for shell/type-check tools
 - An API key for the cloud provider you intend to use, or Ollama for local models
 
 The repository is a Bun workspace, so dependencies are managed from the root.
@@ -188,7 +189,7 @@ bun test
 
 ## 🧪 Quality checks
 
-The repository includes automated unit coverage for core tool-loop protection. Before opening a pull request, run:
+The repository includes regression coverage for security, file/Git/web tools, sessions, streaming and generation with mocked providers/database. Before opening a pull request, run:
 
 ```bash
 bun test
@@ -204,9 +205,9 @@ The Prisma data layer contains `Session` and `Message` entities. Sessions track 
 
 ## 🔐 Security notes
 
-BUILD mode can execute shell commands and modify files inside the configured working directory. The shell tool applies command restrictions, timeouts, output limits and process-group termination. File tools resolve paths against the configured working directory and reject paths that escape it.
+BUILD file changes require approval for each action. Shell and type-check commands run only in a configured Docker sandbox, with a filtered read-only snapshot, no network and no server credentials. There is no host-shell fallback. File tools reject paths outside authorized workspaces, links and sensitive credential paths.
 
-This project is intended for trusted local development environments. Authentication and persistent multi-user authorization are not yet wired into the API, so it should not be exposed as a public multi-user service without adding authentication and authorization.
+The API binds to 127.0.0.1 and requires a local bearer token on every route. The server creates a private token file and the CUI reads it automatically. Workspace roots default to the server working directory and can be configured explicitly. This is a local single-user API; it does not provide multi-user ownership authorization. See [security setup and tests](docs/SEGURANCA_E_TESTES.md) for configuration, behavior changes and limits.
 
 ---
 

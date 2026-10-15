@@ -7,6 +7,7 @@ import { isModelConfigured, isSupportedChatModel } from "../lib/models";
 import { buildConversationHistory, getResumableUserMessage, touchSession } from "./message-service";
 import { streamAIResponse } from "./stream-service";
 import { logger } from "../lib/logger";
+import { authorizeWorkspace } from "../security/workspaces";
 
 const activeResumeSessionIds = new Set<string>();
 
@@ -19,9 +20,11 @@ async function writeSseError(stream: Parameters<Parameters<typeof streamSSE>[1]>
 
 export async function handleResume(c: Context) {
   const sessionId = c.req.param("sessionId");
+  if (!sessionId) return c.json({ error: "Session id is required" }, 400);
   const session = await db.session.findUnique({ where: { id: sessionId }, include: { messages: { orderBy: { createdAt: "asc" } } } });
   if (!session) return c.json({ error: "Session not found" }, 404);
 
+  if (session.cwd) await authorizeWorkspace(session.cwd);
   const resumableMessage = getResumableUserMessage(session.messages);
   if (!resumableMessage) return c.json({ error: "Session has no pending user message to resume" }, 409);
   if (!isSupportedChatModel(resumableMessage.model)) return c.json({ error: `Session uses unsupported model: ${resumableMessage.model}` }, 409);
@@ -53,6 +56,7 @@ export async function handleResume(c: Context) {
 
 export async function handleSubmit(c: Context, data: SubmitBody) {
   const sessionId = c.req.param("sessionId");
+  if (!sessionId) return c.json({ error: "Session id is required" }, 400);
 
   // BUGFIX: o lock precisa ser adquirido de forma síncrona, ANTES de
   // qualquer `await`. Antes, o `activeResumeSessionIds.add(sessionId)`
@@ -73,6 +77,7 @@ export async function handleSubmit(c: Context, data: SubmitBody) {
       return c.json({ error: "Session not found" }, 404);
     }
 
+    if (session.cwd) await authorizeWorkspace(session.cwd);
     await db.message.create({ data: { sessionId, role: "USER", status: MessageStatus.COMPLETE, model: data.model, content: data.content, mode: data.mode } });
     // BUGFIX: `Session.updatedAt` nunca era tocado, então a sessão não
     // subia na listagem (ordenada por atividade recente) assim que o

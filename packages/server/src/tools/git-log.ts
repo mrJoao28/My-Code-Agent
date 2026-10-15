@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { assertGitRepo, runGit } from "../utils/git";
+import { assertGitRepo, runGit, safeTrackedFiles } from "../utils/git";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -22,14 +22,16 @@ export function createGitLogTool(cwd: string) {
         execute: async ({ limit, path }) => {
             await assertGitRepo(cwd);
 
+            const files = await safeTrackedFiles(cwd, path);
+            if (files.length === 0) return { commits: [], count: 0 };
             const args = [
-                "log",
+                "log", "--no-ext-diff", "--no-textconv",
                 "-n",
                 String(limit ?? DEFAULT_LIMIT),
                 "--pretty=format:%h%x09%ad%x09%an%x09%s",
                 "--date=short"
             ];
-            if (path) args.push("--", path);
+            args.push("--", ...files);
 
             const { stdout } = await runGit(cwd, args);
 

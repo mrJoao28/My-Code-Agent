@@ -1,44 +1,29 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { assertGitRepo, runGit, GitError } from "../utils/git";
+import { resolveSafePath, toRelative } from "../utils/path";
 
 export function createGitCommitTool(cwd: string) {
     return tool({
-        description:
-            "Cria um commit git com os arquivos indicados (ou todas as mudanças, se nenhum arquivo for indicado) e a mensagem fornecida. Nunca faz push — isso continua exigindo uma ação manual sua.",
-        inputSchema: z.object({
-            message: z.string().min(1).describe("Mensagem do commit"),
-            files: z
-                .array(z.string())
-                .optional()
-                .describe(
-                    "Arquivos específicos a incluir no commit, relativos ao diretório de trabalho. Se omitido, inclui todas as mudanças (git add -A)"
-                )
-        }),
+        description: "Cria commit somente dos arquivos explícitos aprovados. Preserva arquivos staged fora dessa lista. Hooks e assinatura externa são desativados. Nunca faz push.",
+        inputSchema: z.object({ message: z.string().min(1).max(2000), files: z.array(z.string().min(1)).min(1).max(100) }),
         execute: async ({ message, files }) => {
             await assertGitRepo(cwd);
-
-            if (files && files.length > 0) {
-                await runGit(cwd, ["add", "--", ...files]);
-            } else {
-                await runGit(cwd, ["add", "-A"]);
+            const validated = [];
+            for (const file of files) {
+                const path = await resolveSafePath(cwd, file, { mustExist: false });
+                if (toRelative(cwd, path) === ".") throw new GitError("Informe arquivos individuais.");
+                const info = await import("node:fs/promises").then(fs => fs.lstat(path).catch(error => {
+                    if (error.code === "ENOENT") return null;
+                    throw error;
+                }));
+                if (info?.isDirectory()) throw new GitError("Informe arquivos individuais.");
+                validated.push(toRelative(cwd, path));
             }
-
-            const { stdout: staged } = await runGit(cwd, ["diff", "--cached", "--name-only"]);
-            if (!staged.trim()) {
-                throw new GitError("Nada para commitar — nenhuma mudança staged.");
-            }
-
-            await runGit(cwd, ["commit", "-m", message]);
-
-            const { stdout: hashOut } = await runGit(cwd, ["rev-parse", "--short", "HEAD"]);
-            const { stdout: filesOut } = await runGit(cwd, ["show", "--name-only", "--pretty=format:", "HEAD"]);
-
-            return {
-                commitHash: hashOut.trim(),
-                message,
-                files: filesOut.split("\n").filter(Boolean)
-            };
-        }
+            await runGit(cwd, ["add", "--", ...validated]);
+            await runGit(cwd, ["commit", "--only", "-m", message, "--", ...validated]);
+            const { stdout } = await runGit(cwd, ["rev-parse", "--short", "HEAD"]);
+            return { commitHash: stdout.trim(), message, files: validated };
+        },
     });
 }

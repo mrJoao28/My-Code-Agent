@@ -19,7 +19,7 @@ function countOccurrences(haystack: string, needle: string): number {
 async function atomicWrite(targetPath: string, content: string): Promise<void> {
     const tmpPath = join(dirname(targetPath), `.${randomUUID()}.tmp`);
     try {
-        await writeFile(tmpPath, content, "utf-8");
+        await writeFile(tmpPath, content, { encoding: "utf-8", flag: "wx", mode: 0o600 });
         await rename(tmpPath, targetPath);
     } catch (e) {
         await unlink(tmpPath).catch(() => {});
@@ -56,6 +56,7 @@ export function createEditFileTool(cwd: string) {
             const idx = content.indexOf(old_str);
             const updated = content.slice(0, idx) + new_str + content.slice(idx + old_str.length);
 
+            await resolveSafePath(cwd, resolvedPath);
             await atomicWrite(resolvedPath, updated);
 
             return {

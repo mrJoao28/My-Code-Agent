@@ -3,7 +3,8 @@
     "type": "module",
     "private": true,
     "exports": {
-        ".": "./src/index.ts"
+        ".": "./src/index.ts",
+        "./local-auth": "./src/local-auth.ts"
     },
     "dependencies": {
         "zod": "^4.4.3"

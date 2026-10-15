@@ -6,7 +6,7 @@ import { isModelConfigured, isSupportedChatModel } from "../lib/models";
 import { handleResume, handleSubmit } from "../services/chat-service";
 
 const submitSchema = z.object({
-  content: z.string().trim().min(1, "Message content is required"),
+  content: z.string().trim().min(1, "Message content is required").max(100_000),
   mode: z.nativeEnum(Mode),
   model: z.string().refine(isSupportedChatModel, "Unsupported model"),
 });

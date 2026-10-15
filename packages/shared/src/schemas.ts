@@ -34,6 +34,12 @@ export type MessageParts = z.infer<typeof messagePartsSchema>
 
 export const chatStreamEventSchema = z.discriminatedUnion("type", [
     z.object({
+        type: z.literal("approval-required"),
+        approvalId: z.string(),
+        toolName: z.string(),
+        args: toolCallArgsSchema,
+    }),
+    z.object({
         type: z.literal("text-delta"),
         text: z.string()
     }),

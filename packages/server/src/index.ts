@@ -1,12 +1,19 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { Prisma } from "@myagent/database";
-import sessions from "./routes/sessions";
+import { createSessionRoutes } from "./routes/sessions";
+import { db } from "@myagent/database";
+import { bodyLimit } from "hono/body-limit";
+import { ensureLocalToken, localAuthentication } from "./security/auth";
+import { createPermissionRoutes } from "./routes/permissions";
+import { UnsafePathError, PathNotFoundError } from "./utils/path";
 import chat from "./routes/chat";
 import models from "./routes/models";
 import { logger, generateRequestId } from "./lib/logger";
 
 const app = new Hono<{ Variables: { requestId: string } }>();
+app.use("*", localAuthentication(ensureLocalToken()));
+app.use("*", bodyLimit({ maxSize: 1024 * 1024 }));
 
 app.use(async (c, next) => {
   const requestId = generateRequestId();
@@ -31,6 +38,8 @@ app.use(async (c, next) => {
 
 app.onError((error, c) => {
   const requestId = c.get("requestId") ?? "unknown";
+  if (error instanceof UnsafePathError) return c.json({ error: error.message }, 403);
+  if (error instanceof PathNotFoundError) return c.json({ error: error.message }, 404);
 
   // BUGFIX: antes só logávamos `error.message`/`error.stack`. Para
   // erros do Prisma (PrismaClientKnownRequestError), a informação mais
@@ -81,10 +90,11 @@ app.onError((error, c) => {
 });
 
 const routes = app
-  .route("/session", sessions)
+  .route("/session", createSessionRoutes(db))
   .route("/chat", chat)
-  .route("/models", models);
+  .route("/models", models)
+  .route("/permissions", createPermissionRoutes());
 
 export type AppType = typeof routes;
 
-export default { port: 3000, fetch: app.fetch, idleTimeout: 255 };
+export default { hostname: "127.0.0.1", port: 3000, fetch: app.fetch, idleTimeout: 255 };

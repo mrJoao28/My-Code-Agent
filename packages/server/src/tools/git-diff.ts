@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { assertGitRepo, runGit, truncateOutput } from "../utils/git";
+import { assertGitRepo, runGit, truncateOutput, safeTrackedFiles } from "../utils/git";
 
 export function createGitDiffTool(cwd: string) {
     return tool({
@@ -19,9 +19,11 @@ export function createGitDiffTool(cwd: string) {
         execute: async ({ staged, path }) => {
             await assertGitRepo(cwd);
 
-            const args = ["diff"];
+            const files = await safeTrackedFiles(cwd, path);
+            if (files.length === 0) return { diff: "(sem diferenças)", truncated: false };
+            const args = ["diff", "--ignore-submodules=all", "--no-ext-diff", "--no-textconv", "--relative"];
             if (staged) args.push("--staged");
-            if (path) args.push("--", path);
+            args.push("--", ...files);
 
             const { stdout } = await runGit(cwd, args);
             const { text, truncated } = truncateOutput(stdout);

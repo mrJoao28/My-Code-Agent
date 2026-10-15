@@ -1,7 +1,7 @@
 import { rm } from "fs/promises";
 import { tool } from "ai";
 import { z } from "zod";
-import { resolveSafePath, toRelative } from "../utils/path";
+import { resolveSafePath, toRelative, assertSafeTree } from "../utils/path";
 
 export function createDeleteFileTool(cwd: string) {
     return tool({
@@ -30,6 +30,7 @@ export function createDeleteFileTool(cwd: string) {
                 );
             }
 
+            await assertSafeTree(cwd, resolvedPath);
             await rm(resolvedPath, { recursive: recursive ?? false, force: false });
 
             return {

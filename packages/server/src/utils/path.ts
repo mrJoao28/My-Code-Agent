@@ -1,88 +1,74 @@
-import { resolve, relative, sep } from "path";
-import { realpath } from "fs/promises";
-
+import { resolve, relative, isAbsolute, sep, win32 } from "node:path";
+import { lstat, realpath, readdir } from "node:fs/promises";
 
 export class UnsafePathError extends Error {
-    constructor(targetPath: string) {
-        super(`Path "${targetPath}" está fora do diretório de trabalho`);
-        this.name = "UnsafePathError";
-    }
+    constructor(path: string) { super(`Acesso bloqueado ao caminho: ${path}`); this.name = "UnsafePathError"; }
 }
-
 export class PathNotFoundError extends Error {
-    constructor(targetPath: string) {
-        super(`Path "${targetPath}" não existe`);
-        this.name = "PathNotFoundError";
+    constructor(path: string) { super(`Path "${path}" não existe`); this.name = "PathNotFoundError"; }
+}
+
+export function isInside(root: string, target: string, paths = { relative, isAbsolute, sep }): boolean {
+    const rel = paths.relative(root, target);
+    return rel === "" || (!paths.isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${paths.sep}`));
+}
+
+const PROTECTED_NAMES = new Set([
+    ".git", ".aws", ".ssh", ".gnupg", ".azure", ".kube", ".myagent",
+    ".docker", ".codex", ".claude", ".config", ".git-credentials", "api-token",
+    ".npmrc", ".pypirc", ".netrc", "credentials", "credentials.json", "secrets",
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+]);
+export function isSensitivePath(path: string): boolean {
+    return path.split(/[\\/]/).some(part => {
+        const name = part.toLowerCase();
+        return PROTECTED_NAMES.has(name)
+            || ((name === ".env" || name.startsWith(".env.")) && name !== ".env.example")
+            || /\.(pem|key|p12|pfx)$/.test(name)
+            || /(?:^|[._-])(?:credentials|secrets?)(?:[._-]|$)/.test(name);
+    });
+}
+function assertNames(path: string): void {
+    if (isSensitivePath(path) || path.includes("\0")) throw new UnsafePathError(path);
+    for (const name of path.split(/[\\/]/)) {
+        if (name.includes(":") || /[. ]$/.test(name) && name !== "." && name !== ".."
+            || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) throw new UnsafePathError(path);
     }
 }
 
-function isInside(root: string, resolved: string): boolean {
-    if (resolved === root) return true;
-    const rel = relative(root, resolved);
-    return !rel.startsWith("..") && !rel.startsWith(`..${sep}`) && rel !== "..";
-}
-
-
-export async function resolveSafePath(
-    cwd: string,
-    targetPath: string,
-    options: { mustExist?: boolean } = {}
-): Promise<string> {
-    const mustExist = options.mustExist ?? true;
-
-    const root = await realpath(cwd).catch(() => resolve(cwd));
-    const resolvedTarget = resolve(root, targetPath);
-
-    if (!isInside(root, resolvedTarget)) {
-        throw new UnsafePathError(targetPath);
-    }
-
-    try {
-        const real = await realpath(resolvedTarget);
-        if (!isInside(root, real)) {
-            throw new UnsafePathError(targetPath);
-        }
-        return real;
-    } catch (e) {
-        if (e instanceof UnsafePathError) throw e;
-
-        // O caminho final não existe (ou não pôde ser resolvido via
-        // realpath). Isso NÃO dispensa a validação de symlink: um
-        // diretório intermediário já existente no caminho pode ser um
-        // symlink apontando para fora do `cwd`, e o arquivo final ainda
-        // não existir só significa que o realpath completo falhou — não
-        // que o caminho seja seguro. Por isso validamos o diretório-pai
-        // real independentemente do valor de `mustExist`.
-        const parentDir = resolve(resolvedTarget, "..");
+export async function resolveSafePath(cwd: string, targetPath: string, options: { mustExist?: boolean } = {}): Promise<string> {
+    if (targetPath.includes("\0") || (win32.isAbsolute(targetPath) && !isAbsolute(targetPath))) throw new UnsafePathError(targetPath);
+    const root = await realpath(cwd);
+    if (!(await lstat(root)).isDirectory()) throw new UnsafePathError(cwd);
+    const target = resolve(root, targetPath);
+    if (!isInside(root, target)) throw new UnsafePathError(targetPath);
+    const rel = relative(root, target);
+    assertNames(rel);
+    // Inspect every existing component. Reject internal links too: no aliases to secrets.
+    let cursor = root;
+    const components = rel ? rel.split(sep) : [];
+    for (let i = 0; i < components.length; i++) {
+        cursor = resolve(cursor, components[i]!);
         try {
-            const realParent = await realpath(parentDir);
-            if (!isInside(root, realParent)) {
-                throw new UnsafePathError(targetPath);
-            }
-        } catch (parentErr) {
-            if (parentErr instanceof UnsafePathError) throw parentErr;
-            // Diretório-pai também não existe — nada mais a validar aqui;
-            // se `mustExist` for true isso já será reportado abaixo.
+            const info = await lstat(cursor);
+            if (info.isSymbolicLink() || info.isFile() && info.nlink > 1) throw new UnsafePathError(targetPath);
+            const canonical = await realpath(cursor);
+            if (!isInside(root, canonical)) throw new UnsafePathError(targetPath);
+            assertNames(relative(root, canonical));
+            if (i < components.length - 1 && !info.isDirectory()) throw new UnsafePathError(targetPath);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            if (options.mustExist ?? true) throw new PathNotFoundError(targetPath);
+            // Existing ancestors were checked even when multiple final levels are absent.
+            return target;
         }
-
-        // BUGFIX: antes, quando `mustExist` era `true` e o arquivo não
-        // existia, a função simplesmente devolvia `resolvedTarget` sem
-        // lançar nenhum erro — ou seja, a opção "mustExist" não tinha
-        // nenhum efeito prático além de pular a checagem de symlink
-        // acima (que também era pulada, agravando o problema). Isso
-        // deixava a responsabilidade de reportar "arquivo não encontrado"
-        // inteiramente para a chamada de fs subsequente (ex.: `open()`),
-        // resultando em erros menos claros para o modelo/usuário e, mais
-        // importante, sem qualquer validação de symlink no caminho.
-        if (mustExist) {
-            throw new PathNotFoundError(targetPath);
-        }
-
-        return resolvedTarget;
     }
+    return target;
 }
 
-
-export function toRelative(cwd: string, absolutePath: string): string {
-    return relative(cwd, absolutePath) || ".";
+export async function assertSafeTree(cwd: string, target: string): Promise<void> {
+    const safe = await resolveSafePath(cwd, target);
+    if (!(await lstat(safe)).isDirectory()) return;
+    for (const entry of await readdir(safe)) await assertSafeTree(cwd, resolve(safe, entry));
 }
+export function toRelative(cwd: string, path: string): string { return relative(cwd, path) || "."; }

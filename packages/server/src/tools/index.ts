@@ -1,4 +1,5 @@
 import type { Mode } from "@myagent/database";
+import { secureTools, type ToolSecurityOptions } from "../security/tool-policy";
 import { createBashTool } from "./bash";
 import { createListDirectoryTool } from "./list-directory";
 import { createWriteFileTool } from "./write-file";
@@ -18,7 +19,7 @@ import { createMoveFileTool } from "./move-file";
 import { createApplyPatchTool } from "./apply-patch";
 import { createTodoWriteTool } from "./todo-write";
 
-export function createTools(cwd: string, mode: Mode, sessionId: string) {
+export function createTools(cwd: string, mode: Mode, sessionId: string, security: ToolSecurityOptions = {}) {
     const readOnlyTools = {
         read_file: createReadFileTool(cwd),
         list_directory: createListDirectoryTool(cwd),
@@ -34,10 +35,10 @@ export function createTools(cwd: string, mode: Mode, sessionId: string) {
     };
 
     if (mode === "PLAN") {
-        return readOnlyTools;
+        return secureTools(readOnlyTools, cwd, mode, sessionId, security);
     }
 
-    return {
+    return secureTools({
         ...readOnlyTools,
         write_file: createWriteFileTool(cwd),
         edit_file: createEditFileTool(cwd),
@@ -46,5 +47,5 @@ export function createTools(cwd: string, mode: Mode, sessionId: string) {
         apply_patch: createApplyPatchTool(cwd),
         bash: createBashTool(cwd),
         git_commit: createGitCommitTool(cwd)
-    };
+    }, cwd, mode, sessionId, security);
 }

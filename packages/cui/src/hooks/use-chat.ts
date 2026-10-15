@@ -1,11 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from "react"
-import { EventSourceParserStream } from "eventsource-parser/stream"
+import { readChatEvents } from "../lib/chat-events"
 import prettyMs from "pretty-ms"
 import type { ClientResponse } from "hono/client"
 import { appClient } from "../lib/api-client"
 import { getErrorMessage } from "../lib/http-errors"
 import type { Mode } from "@myagent/database"
-import { chatStreamEventSchema, type SupportedChatModelId } from "@myagent/shared"
+import { type ChatStreamEvent, type SupportedChatModelId } from "@myagent/shared"
 
 export type ClientMessagePart =
   | { type: "reasoning"; text: string }
@@ -48,6 +48,7 @@ type RunStreamParams = {
 
 export function useChat(sessionId: string, initialMessages: Message[]) {
   const [messages, setMessages] = useState<Message[]>(initialMessages)
+  const [pendingApprovals, setPendingApprovals] = useState<Extract<ChatStreamEvent, { type: "approval-required" }>[]>([])
   const [streaming, setStreaming] = useState<StreamingState>({ status: "idle" })
   const activeStreamRef = useRef<ActiveStream | null>(null)
   const autoResumeAttemptedIdRef = useRef<string | null>(null)
@@ -67,6 +68,7 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
   const clearStream = useCallback((requestId: string) => {
     if (!isActiveRequest(requestId)) return
     activeStreamRef.current = null
+    setPendingApprovals([])
     setStreaming({ status: "idle" })
   }, [isActiveRequest])
 
@@ -94,19 +96,15 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
     }
 
     const parts: ClientMessagePart[] = []
-    const stream = response.body.pipeThrough(new TextDecoderStream()).pipeThrough(new EventSourceParserStream())
+    const stream = readChatEvents(response.body)
 
-    for await (const { data } of stream) {
+    for await (const event of stream) {
       if (!isActiveRequest(activeStream.requestId)) return
-      let event: ReturnType<typeof chatStreamEventSchema.parse>
-      try {
-        event = chatStreamEventSchema.parse(JSON.parse(data))
-      } catch (error) {
-        updateMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "error", content: error instanceof Error ? error.message : "Invalid stream event" }])
-        return
-      }
 
       switch (event.type) {
+        case "approval-required":
+          setPendingApprovals(prev => [...prev, event])
+          break
         case "reasoning-delta": {
           const last = parts.at(-1)
           if (last?.type === "reasoning") last.text += event.text
@@ -170,6 +168,7 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
     if (capturePartial) captureInterruptedMessage(activeStream)
     activeStream.controller.abort()
     activeStreamRef.current = null
+    setPendingApprovals([])
     setStreaming({ status: "idle" })
   }, [captureInterruptedMessage])
 
@@ -202,5 +201,11 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
     void resume({ mode: last.mode, model: last.model })
   }, [messages, resume, streaming.status])
 
-  return { messages, streaming, submit, resume, abort, interrupt }
+  const decideApproval = useCallback(async (id: string, approved: boolean) => {
+    const res = await appClient.permissions[":sessionId"][":approvalId"].$post({ param: { sessionId, approvalId: id }, json: { approved } })
+    if (res.ok || res.status === 404) setPendingApprovals(prev => prev.filter(item => item.approvalId !== id))
+    if (!res.ok) throw new Error(await getErrorMessage(res))
+  }, [sessionId])
+
+  return { messages, streaming, submit, resume, abort, interrupt, pendingApprovals, decideApproval }
 }

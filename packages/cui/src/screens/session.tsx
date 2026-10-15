@@ -5,6 +5,7 @@ import prettyMs from "pretty-ms";
 import { MessageStatus } from "@myagent/database";
 import { messagePartsSchema, type SupportedChatModelId } from "@myagent/shared";
 import type { InferResponseType } from "hono";
+import { ApprovalPanel } from "../components/approval-panel";
 import { SessionShell } from "../components/session-shell";
 import { UserrMessage, BotMessage, ErrorMessage } from "../components/messages";
 import { useToast } from "../providers/toast";
@@ -97,7 +98,7 @@ function ChatMessage({ msg }: { msg: Message }) {
 
 function SessionChat({ session }: { session: SessionData }) {
     const [initialMessages] = useState(() => mapDbMessages(session.messages));
-    const { messages, streaming, submit, abort, interrupt } = useChat(session.id, initialMessages);
+    const { messages, streaming, submit, abort, interrupt, pendingApprovals, decideApproval } = useChat(session.id, initialMessages);
     const { isTopLayer } = useKeyboardLayer();
     const { mode, model } = usePromptConfig();
 
@@ -115,11 +116,13 @@ function SessionChat({ session }: { session: SessionData }) {
             onSubmit={(text) => submit({ userText: text, mode, model })}
             loading={streaming.status === "streaming"}
             interruptible={streaming.status === "streaming"}
+            inputDisabled={pendingApprovals.length > 0}
         >
             {messages.map((msg) => <ChatMessage key={msg.id} msg={msg} />)}
             {streaming.status === "streaming" && streaming.parts.length > 0 && (
                 <BotMessage parts={streaming.parts} model={streaming.model} mode={streaming.mode} streaming />
             )}
+            {pendingApprovals[0] && <ApprovalPanel key={pendingApprovals[0].approvalId} approval={pendingApprovals[0]} decide={decideApproval} />}
         </SessionShell>
     );
 }

@@ -7,7 +7,13 @@
     "dev:cli": "bun --env-file=.env --watch packages/cui/src/index.tsx",
     "dev:server": "bun run --hot packages/server/src/index.ts",
     "test": "bun test",
-    "test:watch": "bun test --watch"
+    "test:watch": "bun test --watch",
+    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/database/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/cui/tsconfig.json",
+    "test:integration": "bun scripts/test-integration.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "typescript": "5.9.3"
   },
   "dependencies": {
     "hono": "^4.12.32"

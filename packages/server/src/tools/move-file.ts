@@ -2,7 +2,7 @@ import { rename, mkdir, access } from "fs/promises";
 import { dirname } from "path";
 import { tool } from "ai";
 import { z } from "zod";
-import { resolveSafePath, toRelative } from "../utils/path";
+import { resolveSafePath, toRelative, assertSafeTree } from "../utils/path";
 
 async function pathExists(path: string): Promise<boolean> {
     try {
@@ -29,7 +29,12 @@ export function createMoveFileTool(cwd: string) {
                 throw new Error(`O destino "${to}" já existe. Passe overwrite: true para confirmar a sobrescrita.`);
             }
 
+            if (resolvedFrom === await resolveSafePath(cwd, ".")) throw new Error("Não é permitido mover a raiz do workspace.");
+            await assertSafeTree(cwd, resolvedFrom);
+            if (overwrite && await pathExists(resolvedTo)) await assertSafeTree(cwd, resolvedTo);
             await mkdir(dirname(resolvedTo), { recursive: true });
+            await resolveSafePath(cwd, resolvedFrom);
+            await resolveSafePath(cwd, resolvedTo, { mustExist: false });
             await rename(resolvedFrom, resolvedTo);
 
             return {

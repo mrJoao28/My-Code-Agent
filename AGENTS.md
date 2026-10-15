@@ -39,6 +39,7 @@ Preserve `bun.lock`; atualize-o somente quando a mudança exigir.
 bun install --frozen-lockfile
 bun run --cwd packages/database db.generate
 bun test
+bun run typecheck
 bun run dev:server
 bun run dev:cli
 ```
@@ -60,17 +61,10 @@ bun run --cwd packages/database db.migrate
 Inspecione o banco-alvo antes de migrar. Não use `db.push`, reset ou migrations
 destrutivas como correção automática para erros de schema ou de conexão.
 
-Não há script de typecheck na raiz. Com TypeScript disponível localmente, rode
-o compilador em cada pacote afetado, por exemplo:
-
-```sh
-bun run --cwd packages/cui tsc --noEmit -p tsconfig.json
-```
-
-O compilador local atualmente está disponível na CUI. Verificar o servidor,
-shared e database exige também que seus tipos Bun estejam resolvidos. Registre
-falhas de ambiente separadamente de erros do código; não declare typecheck
-aprovado só porque `bun test` passou.
+A raiz fornece TypeScript e tipos Bun. `bun run typecheck` verifica os quatro
+pacotes, incluindo testes. Gere o cliente Prisma antes da checagem em um checkout
+limpo. Registre falhas de ambiente separadamente de erros do código; não declare
+typecheck aprovado só porque `bun test` passou.
 
 ## Limites de arquitetura
 
@@ -100,9 +94,13 @@ aprovado só porque `bun test` passou.
   disponibilizá-las em PLAN ou BUILD.
 - Use `resolveSafePath` para acesso a arquivos. Ao modificar essa proteção,
   cubra traversal, symlinks/junctions, ancestrais inexistentes e volumes Windows.
-  A implementação atual ainda tem lacunas; não a descreva como sandbox completa.
-- `cwd` limita onde o processo começa; não isola shell, rede ou ambiente.
-  A denylist de `bash.ts` também não constitui uma fronteira de segurança.
+  Links/junctions, hard links e caminhos sensíveis são recusados. Validação no
+  host não é sandbox contra outro processo trocando arquivos durante operações.
+- Shell e type_check só executam na sandbox Docker configurada, sem rede e com
+  snapshot filtrado somente leitura. Não reintroduza fallback de execução no host.
+  A política central exige aprovação antes de efeitos colaterais e rede.
+- A API local usa token privado, rejeita clientes de navegador e limita workspaces.
+  Preserve esses controles em novas rotas. Veja `docs/SEGURANCA_E_TESTES.md`.
 - Propague cancelamento para processos e rede. Libere timers, listeners e locks
   em todos os caminhos. Limite dados enquanto são lidos, não só após acumulá-los.
 - Preserve mudanças e arquivos staged preexistentes. Não crie commits, faça
@@ -134,16 +132,18 @@ aprovado só porque `bun test` passou.
   Prisma gerado nem migrations já aplicadas para mudar seu efeito retroativamente.
 - Considere compatibilidade das mensagens/parts existentes e índices para os
   padrões de leitura. Mudanças de enum e JSON persistido exigem cuidado na CUI.
-- A API atual usa `mock-user` e não aplica autorização por proprietário. Qualquer
-  expansão para múltiplos usuários deve resolver isso antes de expor as rotas.
+- A API é local de um usuário, usa `local-user` e autenticação por token. Qualquer
+  expansão para múltiplos usuários deve implementar autorização por proprietário.
 
 ## Verificação e entrega
 
 - Execute `bun test` e o typecheck dos pacotes afetados quando houver mudança
   de código. Use testes de regressão para bugs, contratos e limites de segurança;
   não crie testes artificiais para alterações só de documentação ou estilo.
-- A suíte atual cobre somente `ToolCallGuard`. Ela não valida integração com
-  PostgreSQL, providers, execução de shell ou interface interativa.
+- A suíte cobre contratos, sessões, geração simulada, tools e segurança. Banco,
+  providers e rede são simulados nos testes normais. Testes reais de container
+  usam `bun run test:integration` com `MYAGENT_TEST_DOCKER_IMAGE` configurada.
+  Não confunda testes ignorados por falta de Docker com integração aprovada.
 - Para streaming e sessão, verifique cenários de erro, cancelamento, reload e
   concorrência. Use mocks para IA/rede; não faça chamadas pagas como teste padrão.
 - Para CUI, preserve gerenciamento de foco e camadas de teclado; verifique Enter,

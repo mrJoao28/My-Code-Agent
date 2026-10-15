@@ -1,12 +1,12 @@
 import { streamText as aiStreamText, stepCountIs } from "ai";
-import { db } from "@myagent/database";
-import { Mode, MessageStatus } from "@myagent/database";
+import type { PrismaClient } from "@myagent/database";
+import { MessageStatus, type Mode } from "@myagent/database/enums";
 import type { ChatStreamEvent, MessagePart } from "@myagent/shared";
 import { toolCallArgsSchema } from "@myagent/shared";
 import { resolveChatModel } from "../lib/models";
 import { buildSystemPrompt } from "../prompts";
 import { createTools, GLOBAL_GENERATION_TIMEOUT_MS, ToolCallGuard, ToolLoopDetectedError } from "./tool-service";
-import { extractFullText, serializeParts, touchSession } from "./message-service";
+import { extractFullText, serializeParts } from "./message-format";
 import { logger } from "../lib/logger";
 
 const MAX_STEPS = 50;
@@ -22,11 +22,26 @@ export type StreamParams = {
     cwd: string | null;
 };
 
-export async function streamAIResponse(stream: StreamSSEArg, params: StreamParams): Promise<void> {
+export type StreamDependencies = {
+    db: Pick<PrismaClient, "message">;
+    touchSession: (sessionId: string) => Promise<void>;
+    resolveModel: typeof resolveChatModel;
+    generate: typeof aiStreamText;
+};
+export async function streamAIResponse(stream: StreamSSEArg, params: StreamParams, dependencies: Partial<StreamDependencies> = {}): Promise<void> {
+    const db = dependencies.db ?? (await import("@myagent/database")).db;
+    const touchSession = dependencies.touchSession ?? (await import("./message-service")).touchSession;
     const { sessionId, model, history, mode, abortController, cwd } = params;
     const startTime = Date.now();
-const tools = cwd ? createTools(cwd, mode, sessionId) : undefined;    const parts: MessagePart[] = [];
     const toolGuard = new ToolCallGuard();
+    const tools = cwd ? createTools(cwd, mode, sessionId, {
+        beforeExecute: (name, input) => {
+            try { toolGuard.register(name, input); }
+            catch (error) { abortController.abort(); throw error; }
+        },
+        notify: async event => { await stream.writeSSE({ event: event.type, data: JSON.stringify(event) }); },
+    }) : undefined;
+    const parts: MessagePart[] = [];
 
 
     const globalTimeout = setTimeout(() => {
@@ -34,7 +49,6 @@ const tools = cwd ? createTools(cwd, mode, sessionId) : undefined;    const part
         abortController.abort();
     }, GLOBAL_GENERATION_TIMEOUT_MS);
 
-    const resolvedModel = resolveChatModel(model);
 
     const persistInterruptedMessage = async (extraNote?: string) => {
         const fullText = extractFullText(parts);
@@ -59,7 +73,8 @@ const tools = cwd ? createTools(cwd, mode, sessionId) : undefined;    const part
     };
 
     try {
-        const result = aiStreamText({
+        const resolvedModel = (dependencies.resolveModel ?? resolveChatModel)(model);
+        const result = (dependencies.generate ?? aiStreamText)({
             model: resolvedModel.model,
             system: buildSystemPrompt({ cwd: cwd ?? "", mode }),
             tools,
@@ -99,7 +114,7 @@ const tools = cwd ? createTools(cwd, mode, sessionId) : undefined;    const part
 
 
                 try {
-                    toolGuard.register(part.toolName, args);
+                    abortController.signal.throwIfAborted();
                 } catch (e) {
                     if (e instanceof ToolLoopDetectedError) {
                         logger.warn(
@@ -128,8 +143,10 @@ const tools = cwd ? createTools(cwd, mode, sessionId) : undefined;    const part
                 await stream.writeSSE({ event: "tool-call", data: JSON.stringify(event) });
             }
 
-            if (part.type === "tool-result") {
-                const resultStr = typeof part.output === "string" ? part.output : JSON.stringify(part.output);
+            if (part.type === "tool-result" || part.type === "tool-error") {
+                const resultStr = part.type === "tool-error"
+                    ? "Tool failed: " + (part.error instanceof Error ? part.error.message : String(part.error))
+                    : typeof part.output === "string" ? part.output : JSON.stringify(part.output);
 
                 const tcPart = parts.find(
                     (p): p is Extract<MessagePart, { type: "tool-call" }> =>

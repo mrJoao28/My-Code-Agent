@@ -4,11 +4,15 @@ import { join } from "node:path";
 const ENV_PATH = join(process.cwd(), ".env");
 
 function escapeEnvValue(value: string) {
-  return JSON.stringify(value);
+  if (value.includes("\0")) throw new Error("Valor de ambiente inválido");
+  for (const quote of ["'", "`", '"']) {
+    if (!value.includes(quote) && !(quote === '"' && /\\[nr]/.test(value))) return quote + value + quote;
+  }
+  throw new Error("Valor não pode ser representado com segurança no arquivo .env");
 }
 
-export function upsertEnvValue(key: string, value: string) {
-  const current = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, "utf8") : "";
+export function upsertEnvValue(key: string, value: string, envPath = ENV_PATH) {
+  const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const lines = current.split(/\r?\n/);
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(`^\\s*(?:export\\s+)?${escapedKey}\\s*=`);
@@ -25,6 +29,6 @@ export function upsertEnvValue(key: string, value: string) {
     }
   }
 
-  writeFileSync(ENV_PATH, lines.join("\n"), "utf8");
+  writeFileSync(envPath, lines.join("\n"), "utf8");
   process.env[key] = value;
 }

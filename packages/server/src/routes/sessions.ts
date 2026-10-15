@@ -1,75 +1,31 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { db, Mode, Role } from "@myagent/database";
+import type { PrismaClient } from "@myagent/database";
+import { Mode } from "@myagent/database/enums";
 import { isSupportedChatModel } from "../lib/models";
-
+import { authorizeWorkspace } from "../security/workspaces";
 const createSessionSchema = z.object({
-  title: z.string(),
-  cwd: z.string().optional(),
-  initialMessage: z
-    .object({
-      role: z.enum(Role),
-      content: z.string(),
-      mode: z.enum(Mode),
-      model: z.string().refine(isSupportedChatModel, "Unsupported model"),
-    })
-    .optional(),
+    title: z.string().trim().min(1).max(200), cwd: z.string().min(1).optional(),
+    initialMessage: z.object({ role: z.literal("USER"), content: z.string().trim().min(1).max(100_000),
+        mode: z.enum(Mode), model: z.string().refine(isSupportedChatModel, "Unsupported model"),
+    }).optional(),
 });
-
-const createSessionValidator = zValidator("json", createSessionSchema, (result, c) => {
-  if (!result.success) {
-    return c.json({ error: "Invalid request body" }, 400);
-  }
-});
-
-const app = new Hono()
-  .get("/", async (c) => {
-    const sessions = await db.session.findMany({
-      // BUGFIX: estava ordenado por `createdAt`, então uma sessão em que
-      // o usuário acabou de conversar não subia para o topo da lista.
-      // `updatedAt` agora é atualizado a cada mensagem (ver touchSession
-      // em message-service.ts), então ordenar por ele reflete a
-      // atividade recente de verdade.
-      orderBy: { updatedAt: "desc" },
-      select: { id: true, title: true, createdAt: true },
-    });
-    return c.json(sessions);
-  })
-  .get("/:id", async (c) => {
-    const id = c.req.param("id");
-    const session = await db.session.findUnique({
-      where: { id },
-      include: { messages: { orderBy: { createdAt: "asc" } } },
-    });
-
-    if (!session) return c.json({ error: "Session not found" }, 404);
-    return c.json(session);
-  })
-  .post("/", createSessionValidator, async (c) => {
-    const { initialMessage, ...data } = c.req.valid("json");
-
-    const session = await db.session.create({
-      data: {
-        title: data.title,
-        cwd: data.cwd ?? null,
-        userId: "mock-user",
-        ...(initialMessage && {
-          messages: {
-            create: {
-              role: initialMessage.role,
-              content: initialMessage.content,
-              mode: initialMessage.mode,
-              model: initialMessage.model,
-              status: "COMPLETE",
-            },
-          },
-        }),
-      },
-      include: { messages: true },
-    });
-
-    return c.json(session, 201);
-  });
-
-export default app;
+export function createSessionRoutes(db: Pick<PrismaClient, "session">, authorize = authorizeWorkspace) {
+    return new Hono()
+        .get("/", async c => c.json(await db.session.findMany({ orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true } })))
+        .get("/:id", async c => {
+            const session = await db.session.findUnique({ where: { id: c.req.param("id") }, include: { messages: { orderBy: { createdAt: "asc" } } } });
+            return session ? c.json(session) : c.json({ error: "Session not found" }, 404);
+        })
+        .post("/", zValidator("json", createSessionSchema), async c => {
+            const { initialMessage, ...data } = c.req.valid("json");
+            const cwd = data.cwd ? await authorize(data.cwd) : null;
+            const session = await db.session.create({
+                data: { title: data.title, cwd, userId: "local-user",
+                    ...(initialMessage && { messages: { create: { ...initialMessage, status: "COMPLETE" } } }),
+                }, include: { messages: true },
+            });
+            return c.json(session, 201);
+        });
+}

@@ -26,7 +26,7 @@ export function createGitStatusTool(cwd: string) {
         execute: async () => {
             await assertGitRepo(cwd);
 
-            const { stdout } = await runGit(cwd, ["status", "--porcelain=v1", "--branch"]);
+            const { stdout } = await runGit(cwd, ["status", "--ignore-submodules=all", "--porcelain=v1", "--branch", "--", "."]);
             const lines = stdout.split("\n").filter(Boolean);
 
             const branchLine = lines.find((l) => l.startsWith("##"));

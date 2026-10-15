@@ -1,7 +1,7 @@
 import { readdir } from "fs/promises";
 import { tool } from "ai";
 import { z } from "zod";
-import { resolveSafePath, toRelative } from "../utils/path";
+import { resolveSafePath, toRelative, isSensitivePath } from "../utils/path";
 
 export function createListDirectoryTool(cwd: string) {
     return tool({
@@ -17,6 +17,7 @@ export function createListDirectoryTool(cwd: string) {
             const entries = await readdir(resolvedPath, { withFileTypes: true });
 
             const items = entries
+                .filter(entry => !entry.isSymbolicLink() && !isSensitivePath(entry.name))
                 .map((entry) => ({
                     name: entry.name,
                     type: entry.isDirectory() ? ("directory" as const) : ("file" as const)
