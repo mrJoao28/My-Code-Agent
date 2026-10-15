@@ -8,6 +8,7 @@ import { buildConversationHistory, getResumableUserMessage, touchSession } from 
 import { streamAIResponse } from "./stream-service";
 import { logger } from "../lib/logger";
 import { authorizeWorkspace } from "../security/workspaces";
+import { loadSessionForUse } from "./session-lifecycle";
 
 const activeResumeSessionIds = new Set<string>();
 
@@ -21,7 +22,7 @@ async function writeSseError(stream: Parameters<Parameters<typeof streamSSE>[1]>
 export async function handleResume(c: Context) {
   const sessionId = c.req.param("sessionId");
   if (!sessionId) return c.json({ error: "Session id is required" }, 400);
-  const session = await db.session.findUnique({ where: { id: sessionId }, include: { messages: { orderBy: { createdAt: "asc" } } } });
+  const session = await loadSessionForUse(db, sessionId);
   if (!session) return c.json({ error: "Session not found" }, 404);
 
   if (session.cwd) await authorizeWorkspace(session.cwd);
@@ -71,7 +72,7 @@ export async function handleSubmit(c: Context, data: SubmitBody) {
   activeResumeSessionIds.add(sessionId);
 
   try {
-    const session = await db.session.findUnique({ where: { id: sessionId }, include: { messages: { orderBy: { createdAt: "asc" } } } });
+    const session = await loadSessionForUse(db, sessionId);
     if (!session) {
       activeResumeSessionIds.delete(sessionId);
       return c.json({ error: "Session not found" }, 404);

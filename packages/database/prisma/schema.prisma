@@ -37,6 +37,7 @@ model Session {
   updatedAt DateTime @updatedAt
   messages Message[]
   @@index([userId])
+  @@index([updatedAt])
 }
 
 model Message {

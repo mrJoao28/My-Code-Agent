@@ -5,6 +5,7 @@ import type { PrismaClient } from "@myagent/database";
 import { Mode } from "@myagent/database/enums";
 import { isSupportedChatModel } from "../lib/models";
 import { authorizeWorkspace } from "../security/workspaces";
+import { loadSessionForUse, unexpiredSessionFilter } from "../services/session-lifecycle";
 const createSessionSchema = z.object({
     title: z.string().trim().min(1).max(200), cwd: z.string().min(1).optional(),
     initialMessage: z.object({ role: z.literal("USER"), content: z.string().trim().min(1).max(100_000),
@@ -13,9 +14,9 @@ const createSessionSchema = z.object({
 });
 export function createSessionRoutes(db: Pick<PrismaClient, "session">, authorize = authorizeWorkspace) {
     return new Hono()
-        .get("/", async c => c.json(await db.session.findMany({ orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true } })))
+        .get("/", async c => c.json(await db.session.findMany({ where: unexpiredSessionFilter(), orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true } })))
         .get("/:id", async c => {
-            const session = await db.session.findUnique({ where: { id: c.req.param("id") }, include: { messages: { orderBy: { createdAt: "asc" } } } });
+            const session = await loadSessionForUse(db, c.req.param("id"));
             return session ? c.json(session) : c.json({ error: "Session not found" }, 404);
         })
         .post("/", zValidator("json", createSessionSchema), async c => {

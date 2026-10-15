@@ -9,6 +9,7 @@ import { DEFAULT_CHAT_MODEL_ID } from "@myagent/shared";
 const token = "test-".repeat(8);
 function setup(authorize?: (cwd: string) => Promise<string>) {
     const session = {
+        updateMany: mock(async ({ where }: { where: { id: string } }) => ({ count: where.id === "s" ? 1 : 0 })),
         findMany: mock(async (_options: unknown) => [{ id: "s", title: "Session" }]),
         findUnique: mock(async ({ where }: { where: { id: string } }) => where.id === "s" ? { id: "s", messages: [{ id: "m", totalTokens: 1_250 }] } : null),
         create: mock(async ({ data }: { data: unknown }) => ({ id: "created", ...data as object, messages: [] })),
@@ -22,11 +23,22 @@ const headers = { Authorization: "Bearer " + token, "Content-Type": "application
 test("sessions list activity order, load history and return 404", async () => {
     const { session, app } = setup();
     expect((await app.request("/session", { headers })).status).toBe(200);
-    expect(session.findMany.mock.calls[0]).toEqual([{ orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true } }]);
+    expect(session.findMany.mock.calls[0]).toMatchObject([{ where: { OR: [
+        { updatedAt: { gt: expect.any(Date) } },
+        { messages: { some: { createdAt: { gt: expect.any(Date) } } } },
+    ] }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true } }]);
+    expect(session.updateMany).not.toHaveBeenCalled();
     const history = await app.request("/session/s", { headers });
     expect(history.status).toBe(200);
     expect(await history.json()).toMatchObject({ messages: [{ totalTokens: 1_250 }] });
+    expect(session.updateMany.mock.calls[0]![0]).toMatchObject({ where: { id: "s" }, data: { updatedAt: expect.any(Date) } });
     expect((await app.request("/session/missing", { headers })).status).toBe(404);
+});
+
+test("unauthenticated requests cannot renew session activity", async () => {
+    const { app, session } = setup();
+    expect((await app.request("/session/s")).status).toBe(401);
+    expect(session.updateMany).not.toHaveBeenCalled();
 });
 test("session creation validates workspace before persistence and preserves initial message", withFixture(async ({ cwd, outside }) => {
     const { app, session } = setup(path => authorizeWorkspace(path, [cwd]));

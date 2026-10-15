@@ -11,6 +11,7 @@ import chat from "./routes/chat";
 import models from "./routes/models";
 import { createChatGPTRoutes } from "./routes/chatgpt";
 import { logger, generateRequestId } from "./lib/logger";
+import { startSessionCleanup } from "./services/session-lifecycle";
 
 const app = new Hono<{ Variables: { requestId: string } }>();
 app.use("*", localAuthentication(ensureLocalToken()));
@@ -98,5 +99,12 @@ const routes = app
   .route("/permissions", createPermissionRoutes());
 
 export type AppType = typeof routes;
+
+if (import.meta.main) {
+  // Bun --hot reavalia o módulo; cancela o timer anterior antes de substituí-lo.
+  const runtime = globalThis as typeof globalThis & { stopMyagentSessionCleanup?: () => void };
+  runtime.stopMyagentSessionCleanup?.();
+  runtime.stopMyagentSessionCleanup = startSessionCleanup(db);
+}
 
 export default { hostname: "127.0.0.1", port: 3000, fetch: app.fetch, idleTimeout: 255 };
