@@ -10,7 +10,7 @@ const token = "test-".repeat(8);
 function setup(authorize?: (cwd: string) => Promise<string>) {
     const session = {
         findMany: mock(async (_options: unknown) => [{ id: "s", title: "Session" }]),
-        findUnique: mock(async ({ where }: { where: { id: string } }) => where.id === "s" ? { id: "s", messages: [] } : null),
+        findUnique: mock(async ({ where }: { where: { id: string } }) => where.id === "s" ? { id: "s", messages: [{ id: "m", totalTokens: 1_250 }] } : null),
         create: mock(async ({ data }: { data: unknown }) => ({ id: "created", ...data as object, messages: [] })),
     };
     const db = { session } as unknown as Parameters<typeof createSessionRoutes>[0];
@@ -23,7 +23,9 @@ test("sessions list activity order, load history and return 404", async () => {
     const { session, app } = setup();
     expect((await app.request("/session", { headers })).status).toBe(200);
     expect(session.findMany.mock.calls[0]).toEqual([{ orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true } }]);
-    expect((await app.request("/session/s", { headers })).status).toBe(200);
+    const history = await app.request("/session/s", { headers });
+    expect(history.status).toBe(200);
+    expect(await history.json()).toMatchObject({ messages: [{ totalTokens: 1_250 }] });
     expect((await app.request("/session/missing", { headers })).status).toBe(404);
 });
 test("session creation validates workspace before persistence and preserves initial message", withFixture(async ({ cwd, outside }) => {

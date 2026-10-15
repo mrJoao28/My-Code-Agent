@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { readChatEvents } from "../lib/chat-events"
+import { sumSessionTokens } from "../lib/token-usage"
 import prettyMs from "pretty-ms"
 import type { ClientResponse } from "hono/client"
 import { appClient } from "../lib/api-client"
@@ -21,14 +22,14 @@ export type ClientToolCallPart = {
   status: "calling" | "done"
 }
 
-export type Message =
+export type Message = { totalTokens?: number } & (
   | { id: string; role: "user"; content: string; mode: Mode; model: SupportedChatModelId }
   | { id: string; role: "assistant"; content: string; mode: Mode; model: SupportedChatModelId; parts: ClientMessagePart[]; duration?: string; interrupted?: boolean }
-  | { id: string; role: "error"; content: string }
+  | { id: string; role: "error"; content: string })
 
 type StreamingState =
   | { status: "idle" }
-  | { status: "streaming"; parts: ClientMessagePart[]; mode: Mode; model: SupportedChatModelId }
+  | { status: "streaming"; parts: ClientMessagePart[]; mode: Mode; model: SupportedChatModelId; totalTokens: number }
 
 type ActiveStream = {
   requestId: string
@@ -37,6 +38,7 @@ type ActiveStream = {
   model: SupportedChatModelId
   parts: ClientMessagePart[]
   interruptedCaptured: boolean
+  totalTokens: number
 }
 
 type SubmitParams = { userText: string; mode: Mode; model: SupportedChatModelId }
@@ -46,7 +48,7 @@ type RunStreamParams = {
   request: (controller: AbortController) => Promise<ClientResponse<unknown>>
 }
 
-export function useChat(sessionId: string, initialMessages: Message[]) {
+export function useChat(sessionId: string, initialMessages: Message[], client = appClient) {
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [pendingApprovals, setPendingApprovals] = useState<Extract<ChatStreamEvent, { type: "approval-required" }>[]>([])
   const [streaming, setStreaming] = useState<StreamingState>({ status: "idle" })
@@ -62,7 +64,7 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
     if (!activeStream) return
     const snapshot = [...parts]
     activeStream.parts = snapshot
-    setStreaming({ status: "streaming", parts: snapshot, mode: activeStream.mode, model: activeStream.model })
+    setStreaming({ status: "streaming", parts: snapshot, mode: activeStream.mode, model: activeStream.model, totalTokens: activeStream.totalTokens })
   }, [isActiveRequest])
 
   const clearStream = useCallback((requestId: string) => {
@@ -73,13 +75,14 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
   }, [isActiveRequest])
 
   const captureInterruptedMessage = useCallback((activeStream: ActiveStream) => {
-    if (activeStream.interruptedCaptured || activeStream.parts.length === 0) return
+    if (activeStream.interruptedCaptured || (activeStream.parts.length === 0 && activeStream.totalTokens === 0)) return
     activeStream.interruptedCaptured = true
     const parts = [...activeStream.parts]
     const content = parts.filter((part): part is Extract<ClientMessagePart, { type: "text" }> => part.type === "text").map((part) => part.text).join("")
     updateMessages((prev) => [...prev, {
       id: crypto.randomUUID(), role: "assistant", content,
       mode: activeStream.mode, model: activeStream.model, parts, interrupted: true,
+      totalTokens: activeStream.totalTokens,
     }])
   }, [updateMessages])
 
@@ -102,6 +105,11 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
       if (!isActiveRequest(activeStream.requestId)) return
 
       switch (event.type) {
+        case "usage":
+          // O evento contém o acumulado da geração, não um delta.
+          activeStream.totalTokens = event.totalTokens
+          emitParts(activeStream.requestId, parts)
+          break
         case "approval-required":
           setPendingApprovals(prev => [...prev, event])
           break
@@ -135,11 +143,14 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
             id: event.messageId, role: "assistant", content,
             mode: activeStream.mode, model: activeStream.model,
             duration: prettyMs(event.durationMs), parts: [...parts],
+            totalTokens: activeStream.totalTokens,
           }])
+          setStreaming({ status: "idle" })
           return
         }
         case "error":
-          updateMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "error", content: event.message }])
+          updateMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "error", content: event.message, totalTokens: activeStream.totalTokens }])
+          setStreaming({ status: "idle" })
           return
       }
     }
@@ -147,15 +158,15 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
 
   const runStream = useCallback(async ({ mode, model, request }: RunStreamParams) => {
     const controller = new AbortController()
-    const activeStream: ActiveStream = { requestId: crypto.randomUUID(), controller, mode, model, parts: [], interruptedCaptured: false }
+    const activeStream: ActiveStream = { requestId: crypto.randomUUID(), controller, mode, model, parts: [], interruptedCaptured: false, totalTokens: 0 }
     activeStreamRef.current = activeStream
-    setStreaming({ status: "streaming", parts: [], mode, model })
+    setStreaming({ status: "streaming", parts: [], mode, model, totalTokens: 0 })
     try {
       await handleStream(await request(controller), activeStream)
     } catch (error) {
       if (controller.signal.aborted) return
       if (isActiveRequest(activeStream.requestId)) {
-        updateMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "error", content: error instanceof Error ? error.message : String(error) }])
+        updateMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "error", content: error instanceof Error ? error.message : String(error), totalTokens: activeStream.totalTokens }])
       }
     } finally {
       clearStream(activeStream.requestId)
@@ -177,21 +188,21 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
 
   const resume = useCallback(async ({ mode, model }: Omit<SubmitParams, "userText">) => {
     if (activeStreamRef.current) return
-    await runStream({ mode, model, request: (controller) => appClient.chat[":sessionId"].resume.$post(
+    await runStream({ mode, model, request: (controller) => client.chat[":sessionId"].resume.$post(
       { param: { sessionId } }, { init: { signal: controller.signal } },
     ) })
-  }, [runStream, sessionId])
+  }, [client, runStream, sessionId])
 
   const submit = useCallback(async ({ userText, mode, model }: SubmitParams) => {
     if (!userText.trim() || activeStreamRef.current) return
     const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: userText, mode, model }
     autoResumeAttemptedIdRef.current = userMessage.id
     updateMessages((prev) => [...prev, userMessage])
-    await runStream({ mode, model, request: (controller) => appClient.chat[":sessionId"].$post(
+    await runStream({ mode, model, request: (controller) => client.chat[":sessionId"].$post(
       { param: { sessionId }, json: { content: userText, mode, model } },
       { init: { signal: controller.signal } },
     ) })
-  }, [runStream, sessionId, updateMessages])
+  }, [client, runStream, sessionId, updateMessages])
 
   useEffect(() => {
     const last = messages.at(-1)
@@ -202,10 +213,11 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
   }, [messages, resume, streaming.status])
 
   const decideApproval = useCallback(async (id: string, approved: boolean) => {
-    const res = await appClient.permissions[":sessionId"][":approvalId"].$post({ param: { sessionId, approvalId: id }, json: { approved } })
+    const res = await client.permissions[":sessionId"][":approvalId"].$post({ param: { sessionId, approvalId: id }, json: { approved } })
     if (res.ok || res.status === 404) setPendingApprovals(prev => prev.filter(item => item.approvalId !== id))
     if (!res.ok) throw new Error(await getErrorMessage(res))
-  }, [sessionId])
+  }, [client, sessionId])
 
-  return { messages, streaming, submit, resume, abort, interrupt, pendingApprovals, decideApproval }
+  const totalTokens = sumSessionTokens(messages) + (streaming.status === "streaming" ? streaming.totalTokens : 0)
+  return { messages, streaming, submit, resume, abort, interrupt, pendingApprovals, decideApproval, totalTokens }
 }

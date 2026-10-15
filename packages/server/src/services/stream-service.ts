@@ -42,6 +42,8 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
         notify: async event => { await stream.writeSSE({ event: event.type, data: JSON.stringify(event) }); },
     }) : undefined;
     const parts: MessagePart[] = [];
+    let totalTokens: number | null = null;
+    let messagePersisted = false;
 
 
     const globalTimeout = setTimeout(() => {
@@ -53,7 +55,7 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
     const persistInterruptedMessage = async (extraNote?: string) => {
         const fullText = extractFullText(parts);
 
-        if (fullText.length === 0 && parts.length === 0) return;
+        if (fullText.length === 0 && parts.length === 0 && totalTokens === null) return;
         const elapsedMs = Date.now() - startTime;
         const validatedParts = serializeParts(parts);
 
@@ -65,10 +67,12 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
                 model,
                 content: extraNote ? `${fullText}\n\n[${extraNote}]` : fullText,
                 parts: validatedParts,
+                totalTokens,
                 mode,
                 duration: Math.round(elapsedMs / 1000)
             }
         });
+        messagePersisted = true;
         await touchSession(sessionId);
     };
 
@@ -99,6 +103,19 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
 
         for await (const part of result.fullStream) {
             if (stream.aborted) break;
+
+            if (part.type === "finish-step") {
+                const reported = part.usage.totalTokens ?? (
+                    part.usage.inputTokens === undefined && part.usage.outputTokens === undefined
+                        ? undefined
+                        : (part.usage.inputTokens ?? 0) + (part.usage.outputTokens ?? 0)
+                );
+                if (reported !== undefined && Number.isSafeInteger(reported) && reported >= 0) {
+                    totalTokens = Math.min(2_147_483_647, (totalTokens ?? 0) + reported);
+                    const event: ChatStreamEvent = { type: "usage", totalTokens };
+                    await stream.writeSSE({ event: "usage", data: JSON.stringify(event) });
+                }
+            }
 
             if (part.type === "reasoning-delta") {
                 const last = parts[parts.length - 1];
@@ -206,10 +223,12 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
                 model,
                 content: fullText,
                 parts: validatedParts,
+                totalTokens,
                 mode,
                 duration: Math.round(elapsedMs / 1000)
             }
         });
+        messagePersisted = true;
         await touchSession(sessionId);
 
         logger.info(
@@ -232,6 +251,10 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
 
         await stream.writeSSE({ event: "done", data: JSON.stringify(doneEvent) });
     } catch (e) {
+        if (messagePersisted) {
+            logger.warn({ sessionId, event: "post_persistence_failure" }, "Generation was already persisted; skipping duplicate message");
+            return;
+        }
         if (abortController.signal.aborted) {
             await persistInterruptedMessage();
             return;
@@ -248,6 +271,7 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
                 status: MessageStatus.COMPLETE,
                 model,
                 content: message,
+                totalTokens,
                 mode
             }
         });

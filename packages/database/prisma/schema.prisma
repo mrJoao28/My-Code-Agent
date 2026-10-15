@@ -49,6 +49,7 @@ model Message {
   parts Json?
   mode Mode
   duration Int?
+  totalTokens Int?
   createdAt DateTime @default(now())
   session Session @relation(fields: [sessionId],references: [id], onDelete: Cascade)
   @@index([sessionId])

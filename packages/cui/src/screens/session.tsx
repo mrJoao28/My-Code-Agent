@@ -26,7 +26,7 @@ const sessionLocationSchema = z.object({
 function mapDbMessages(dbMessages: SessionData["messages"]): Message[] {
     return dbMessages.map((message): Message => {
         if (message.role === "ERROR") {
-            return { id: message.id, role: "error", content: message.content };
+            return { id: message.id, role: "error", content: message.content, totalTokens: message.totalTokens ?? undefined };
         }
 
         if (message.role === "USER") {
@@ -71,6 +71,7 @@ function mapDbMessages(dbMessages: SessionData["messages"]): Message[] {
             model: message.model as SupportedChatModelId,
             mode: message.mode,
             parts,
+            totalTokens: message.totalTokens ?? undefined,
             ...(message.duration != null ? { duration: prettyMs(message.duration * 1000) } : {}),
             interrupted: message.status === MessageStatus.INTERRUPTED
         };
@@ -98,7 +99,7 @@ function ChatMessage({ msg }: { msg: Message }) {
 
 function SessionChat({ session }: { session: SessionData }) {
     const [initialMessages] = useState(() => mapDbMessages(session.messages));
-    const { messages, streaming, submit, abort, interrupt, pendingApprovals, decideApproval } = useChat(session.id, initialMessages);
+    const { messages, streaming, submit, abort, interrupt, pendingApprovals, decideApproval, totalTokens } = useChat(session.id, initialMessages);
     const { isTopLayer } = useKeyboardLayer();
     const { mode, model } = usePromptConfig();
 
@@ -117,6 +118,7 @@ function SessionChat({ session }: { session: SessionData }) {
             loading={streaming.status === "streaming"}
             interruptible={streaming.status === "streaming"}
             inputDisabled={pendingApprovals.length > 0}
+            totalTokens={totalTokens}
         >
             {messages.map((msg) => <ChatMessage key={msg.id} msg={msg} />)}
             {streaming.status === "streaming" && streaming.parts.length > 0 && (

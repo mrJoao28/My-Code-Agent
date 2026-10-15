@@ -60,10 +60,11 @@ export function useTheme(): ThemeContextValue {
 
 type ThemeProviderProps = {
     children: ReactNode;
+    initialTheme?: Theme;
 };
 
-export function ThemeProvider({ children }: ThemeProviderProps) {
-    const [currentTheme, setCurrentTheme] = useState<Theme>(getInitialTheme);
+export function ThemeProvider({ children, initialTheme }: ThemeProviderProps) {
+    const [currentTheme, setCurrentTheme] = useState<Theme>(() => initialTheme ?? getInitialTheme());
 
     const setTheme = useCallback((theme: Theme) => {
         setCurrentTheme(theme);

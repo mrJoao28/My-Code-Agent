@@ -19,6 +19,49 @@ function setup(parts: unknown[], controller = new AbortController()) {
     const params: StreamParams = { sessionId: "s", model: "fixture", mode: "PLAN", history: [], cwd: null, abortController: controller };
     return { created, events, dependencies, params, stream, create };
 }
+
+test("usage accumulates every model step once and survives persistence", async () => {
+    const fixture = setup([
+        { type: "finish-step", usage: { inputTokens: 1_000, outputTokens: 200, totalTokens: 1_200 } },
+        { type: "finish-step", usage: { inputTokens: 2_000, outputTokens: 300, totalTokens: 2_300 } },
+        { type: "finish", totalUsage: { totalTokens: 3_500 } },
+    ]);
+    await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+    expect(fixture.created[0]!.totalTokens).toBe(3_500);
+    expect(fixture.events.filter(event => event.event === "usage").map(event => JSON.parse(event.data).totalTokens)).toEqual([1_200, 3_500]);
+});
+
+test.each(["abort", "failure"])("reported usage is retained after %s even without text", async ending => {
+    const fixture = setup([
+        { type: "finish-step", usage: { inputTokens: 100, outputTokens: 50 } },
+        ending === "abort" ? "abort" : { type: "error", error: new Error("fixture failure") },
+    ]);
+    await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+    expect(fixture.created).toHaveLength(1);
+    expect(fixture.created[0]!.totalTokens).toBe(150);
+    expect(fixture.created[0]!.role).toBe(ending === "abort" ? "ASSISTANT" : "ERROR");
+    expect(fixture.events.some(event => event.event === "done")).toBe(false);
+});
+
+test("missing or invalid provider usage is never estimated from text", async () => {
+    const fixture = setup([
+        { type: "text-delta", text: "some text" },
+        ...[undefined, -1, 1.5, NaN].map(totalTokens => ({ type: "finish-step", usage: { totalTokens } })),
+    ]);
+    await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+    expect(fixture.created[0]!.totalTokens).toBeNull();
+    expect(fixture.events.some(event => event.event === "usage")).toBe(false);
+});
+
+test("failed terminal SSE does not persist or count the same generation twice", async () => {
+    const fixture = setup([{ type: "finish-step", usage: { totalTokens: 200 } }]);
+    fixture.stream.writeSSE = async event => {
+        if (event.event === "done") throw new Error("transport closed");
+    };
+    await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+    expect(fixture.created).toHaveLength(1);
+    expect(fixture.created[0]!.totalTokens).toBe(200);
+});
 test("generation streams parts, persists assistant once and signals its saved id", async () => {
     const fixture = setup([
         { type: "reasoning-delta", text: "summary" }, { type: "text-delta", text: "hello" }, { type: "text-delta", text: " world" },

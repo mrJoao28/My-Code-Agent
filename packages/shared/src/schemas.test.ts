@@ -22,3 +22,10 @@ test("default model exists and built-in identifiers are unique", () => {
     expect(new Set(SUPPORTED_CHAT_MODELS.map(m => m.id)).size).toBe(SUPPORTED_CHAT_MODELS.length);
     expect(findSupportedChatModel("unsupported")).toBeUndefined();
 });
+
+test("usage events accept nonnegative integer totals and reject invalid accounting", () => {
+    expect(chatStreamEventSchema.parse({ type: "usage", totalTokens: 1_250 })).toEqual({ type: "usage", totalTokens: 1_250 });
+    for (const totalTokens of [-1, 1.5, Infinity, "1000", 2_147_483_648]) {
+        expect(chatStreamEventSchema.safeParse({ type: "usage", totalTokens }).success).toBe(false);
+    }
+});

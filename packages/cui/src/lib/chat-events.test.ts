@@ -15,6 +15,7 @@ test("SSE decodes fragmented events, approvals, tools and completion in order", 
         { type: "approval-required", approvalId: "a", toolName: "write_file", args: { path: "x" } },
         { type: "tool-call", toolCallId: "t", toolName: "write_file", args: { path: "x" } },
         { type: "tool-result", toolCallId: "t", toolName: "write_file", result: "ok" },
+        { type: "usage", totalTokens: 1_250 },
         { type: "done", messageId: "m", durationMs: 10 },
     ];
     const encoded = raw.map(event => "event: " + event.type + "\ndata: " + JSON.stringify(event) + "\n\n").join("");
