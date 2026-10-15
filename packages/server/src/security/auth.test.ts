@@ -26,6 +26,26 @@ describe("Local API authentication", () => {
         expect((await app().request("/", { headers: { ...headers, Host: "attacker.example" } })).status).toBe(403);
         expect((await app().request("http://127.0.0.1/", { headers })).status).toBe(200);
     });
+    test.each([
+        "localhost", "localhost:3000", "LOCALHOST:3000",
+        "127.0.0.1", "127.0.0.1:3000", "[::1]", "[::1]:3000",
+    ])("accepts authenticated native clients with Host %s", async host => {
+        const url = `http://${host}/session`;
+        expect((await app().request(url, { headers: { ...headers, Host: host } })).status).toBe(200);
+        expect((await app().request(url, { headers: { Host: host } })).status).toBe(401);
+        expect((await app().request(url, {
+            headers: { ...headers, Host: host, Origin: "http://localhost:3000" },
+        })).status).toBe(403);
+    });
+    test.each([
+        "localhost.attacker.example:3000", "127.0.0.1.attacker.example:3000",
+        "127x0x0x1:3000", "[::1].attacker.example:3000",
+        "localhost:abc", "localhost:300000", "localhost:3000@attacker.example",
+    ])("rejects invalid or foreign Host %s even with a valid token", async host => {
+        expect((await app().request("http://127.0.0.1:3000/session", {
+            headers: { ...headers, Host: host },
+        })).status).toBe(403);
+    });
     test("rejects oversized request body after authentication", async () => {
         expect((await app().request("/", { method: "POST", headers, body: "x".repeat(2048) })).status).toBe(413);
     });

@@ -18,7 +18,7 @@ export function localAuthentication(token: string): MiddlewareHandler {
     return async (c, next) => {
         const host = new URL(c.req.url).hostname;
         if (!["127.0.0.1", "localhost", "[::1]", "::1"].includes(host) || c.req.header("Origin")
-            || c.req.header("Host") && !/^(localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?$/i.test(c.req.header("Host")!)) return c.json({ error: "Local native clients only" }, 403);
+            || c.req.header("Host") && !/^(localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i.test(c.req.header("Host")!)) return c.json({ error: "Local native clients only" }, 403);
         const authorization = c.req.header("Authorization") ?? "";
         const candidate = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
         if (!candidate || !timingSafeEqual(expected, createHash("sha256").update(candidate).digest())) return c.json({ error: "Unauthorized" }, 401);
