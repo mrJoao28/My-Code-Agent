@@ -6,7 +6,13 @@
   "bin": { "myagent": "./dist/cli.js" },
   "files": ["dist"],
   "engines": { "bun": ">=1.3.13" },
-  "scripts": { "build": "bun build.ts" },
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/mrJoao28/My-Code-Agent.git" },
+  "keywords": ["cli", "ai", "agent", "coding-assistant", "bun"],
+  "scripts": {
+    "build": "bun build.ts",
+    "prepublishOnly": "bun run build"
+  },
   "dependencies": {
     "@libsql/client": "^0.15.15",
     "@prisma/adapter-libsql": "7.4.0",
