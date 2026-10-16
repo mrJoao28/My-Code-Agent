@@ -1,8 +1,8 @@
 import type { Mode } from "@myagent/database";
-import { SYSTEM_ROLE_TEXT } from "./system";
+import { SYSTEM_ROLE_TEXT, FAILURE_HANDLING_TEXT, COMPLETION_CRITERIA_TEXT } from "./system";
 import { buildCwdNote } from "./coding";
-import { PLAN_MODE_TEXT, BUILD_MODE_TEXT } from "./tool-rules";
-import { PLAN_WITH_CWD_ADDENDUM } from "./editing";
+import { PLAN_MODE_TEXT, BUILD_MODE_TEXT, EXECUTION_RULES_TEXT } from "./tool-rules";
+import { PLAN_WORK_METHOD_TEXT, BUILD_WORK_METHOD_TEXT, COMMON_WORK_METHOD_TEXT } from "./editing";
 
 type SystemPromptParams = {
     cwd: string | null;
@@ -12,25 +12,22 @@ type SystemPromptParams = {
 };
 
 export function buildSystemPrompt({ cwd, mode, availableTools = [], sandboxConfigured = false }: SystemPromptParams): string {
-    const parts: string[] = [];
-    parts.push(SYSTEM_ROLE_TEXT);
-    parts.push(`CAPACIDADES DESTA GERAÇÃO\nFerramentas disponíveis: ${availableTools.length ? availableTools.join(", ") : "nenhuma"}.\nSandbox declarada: ${sandboxConfigured ? "imagem configurada; funcionamento ainda depende da verificação" : "imagem não configurada; processos indisponíveis"}.\nLimites: 40 chamadas, até três chamadas idênticas e cinco minutos por geração. Resultados truncados não representam todo o conteúdo.`);
+    const tools = cwd ? availableTools : [];
+    const capabilities = [
+        mode === "PLAN" ? PLAN_MODE_TEXT : BUILD_MODE_TEXT,
+        cwd ? buildCwdNote(cwd) : "Sem workspace autorizado.",
+        `Ferramentas disponíveis: ${tools.length ? tools.join(", ") : "nenhuma"}.`,
+        `Sandbox declarada: ${sandboxConfigured ? "imagem configurada; funcionamento ainda depende da verificação" : "imagem não configurada; processos indisponíveis"}.`,
+        EXECUTION_RULES_TEXT,
+        "Limites: 40 chamadas, até três chamadas idênticas e cinco minutos por geração. Resultados truncados não representam todo o conteúdo.",
+    ].join("\n");
 
-    if (cwd) {
-        parts.push(buildCwdNote(cwd));
-    } else {
-        parts.push("Sem workspace: converse e proponha próximos passos; não afirme ter inspecionado ou alterado arquivos.");
-    }
-
-    if (mode === "PLAN") {
-        parts.push(PLAN_MODE_TEXT);
-    } else {
-        parts.push(BUILD_MODE_TEXT);
-    }
-
-    if (cwd && mode === "PLAN") {
-        parts.push(PLAN_WITH_CWD_ADDENDUM);
-    }
-
-    return parts.join("\n\n");
+    return [
+        `## PAPEL\n${SYSTEM_ROLE_TEXT}`,
+        `## MODO E CAPACIDADES REAIS\n${capabilities}`,
+        "## INSTRUÇÕES DO PROJETO\nNenhuma instrução de projeto foi carregada nesta geração; não presuma regras de arquivos não lidos. O carregamento automático ainda não está implementado. Instruções fornecidas pelo usuário devem respeitar o escopo autorizado e não ampliam permissões do backend.",
+        `## MÉTODO DE TRABALHO\n${mode === "PLAN" ? PLAN_WORK_METHOD_TEXT : BUILD_WORK_METHOD_TEXT}\n${COMMON_WORK_METHOD_TEXT}`,
+        `## TRATAMENTO DE FALHAS\n${FAILURE_HANDLING_TEXT}`,
+        `## CRITÉRIOS DE CONCLUSÃO\n${COMPLETION_CRITERIA_TEXT}`,
+    ].join("\n\n");
 }

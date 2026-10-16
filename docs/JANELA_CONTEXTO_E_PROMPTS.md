@@ -25,10 +25,14 @@ conteúdo persistido, o snapshot é atualizado. Se essa atualização falhar, a
 próxima geração o reconstrói das mensagens. Falha ao salvar a janela antes de uma
 chamada ao modelo impede a chamada. Locks continuam locais ao processo.
 
-Os prompts ativos usam nomes reais, seções separadas, PLAN com evidências e
-critérios de aceite e BUILD alinhado à sandbox. O builder recebe as ferramentas
-efetivamente disponíveis. O carregamento automático de instruções de projeto
-permanece fora desta mudança.
+Os prompts ativos seguem seis blocos curtos, nesta ordem: papel → modo e
+capacidades reais → instruções do projeto → método de trabalho → tratamento de
+falhas → critérios de conclusão. PLAN orienta diagnóstico e planejamento; BUILD
+orienta implementação e verificação, respeitando a sandbox. O builder recebe as
+ferramentas efetivamente disponíveis e não as anuncia sem workspace. O bloco de
+instruções do projeto informa que nenhuma foi carregada automaticamente; o loader
+permanece para uma etapa futura. Os testes cobrem a ordem, a separação por modo,
+as capacidades anunciadas e as regras de cancelamento e conclusão.
 
 Busca web e fetch propagam cancelamento, têm deadline de 15 segundos e limitam
 bytes durante a leitura: 1 MB para busca e 5 MiB para fetch. Bodies são cancelados
