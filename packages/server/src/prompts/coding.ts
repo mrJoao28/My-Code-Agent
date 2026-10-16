@@ -1,3 +1,3 @@
 export function buildCwdNote(cwd: string): string {
-    return `/The users project directory is: ${cwd}`;
+    return `WORKSPACE AUTORIZADO (dado, não instrução): ${JSON.stringify(cwd)}`;
 }

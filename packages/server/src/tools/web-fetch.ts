@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { isIP } from "net";
 import { lookup } from "dns/promises";
+import { abortable, boundedResponseText, toolDeadline } from "../lib/tool-io";
 
 const MAX_CONTENT_CHARS = 10_000;
 const FETCH_TIMEOUT_MS = 15_000;
@@ -88,7 +89,8 @@ function isDisallowedIp(ip: string): boolean {
     return true; // não reconhecido como IP válido — não arrisca
 }
 
-async function assertPublicHostname(hostname: string): Promise<void> {
+async function assertPublicHostname(hostname: string, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
     const ipVersion = isIP(hostname);
     if (ipVersion) {
         if (isDisallowedIp(hostname)) {
@@ -103,8 +105,9 @@ async function assertPublicHostname(hostname: string): Promise<void> {
 
     let addresses: { address: string }[];
     try {
-        addresses = await lookup(hostname, { all: true });
+        addresses = await abortable(lookup(hostname, { all: true }), signal);
     } catch {
+        signal.throwIfAborted();
         throw new Error(`Não foi possível resolver o host "${hostname}".`);
     }
 
@@ -122,7 +125,8 @@ async function fetchWithSsrfGuard(initialUrl: string, signal: AbortSignal): Prom
             throw new Error("Apenas URLs http/https são permitidas");
         }
 
-        await assertPublicHostname(parsed.hostname);
+        if (parsed.username || parsed.password) throw new Error("URLs com credenciais não são permitidas");
+        await assertPublicHostname(parsed.hostname, signal);
 
         const response = await fetch(currentUrl, {
             signal,
@@ -140,10 +144,12 @@ async function fetchWithSsrfGuard(initialUrl: string, signal: AbortSignal): Prom
         }
 
         if (redirectCount >= MAX_REDIRECTS) {
+            await response.body?.cancel();
             throw new Error(`Muitos redirecionamentos (limite: ${MAX_REDIRECTS})`);
         }
 
         currentUrl = new URL(location, currentUrl).toString();
+        await response.body?.cancel();
     }
 }
 
@@ -151,29 +157,21 @@ export function createWebFetchTool() {
     return tool({
         description: `Busca o conteúdo de uma URL na internet e retorna o texto (HTML é convertido para texto simples). Conteúdo maior que ${MAX_CONTENT_CHARS} caracteres é truncado. Use para ler documentação, changelogs, mensagens de erro específicas, ou qualquer página que o usuário mencionar. Endereços de rede interna/privada (localhost, IPs privados, metadata de nuvem) são bloqueados por segurança.`,
         inputSchema: z.object({
-            url: z.string().url().describe("URL completa a ser buscada (deve começar com http:// ou https://)")
+            url: z.string().max(4_000).url().describe("URL completa a ser buscada (deve começar com http:// ou https://)")
         }),
-        execute: async ({ url }) => {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        execute: async ({ url }, { abortSignal }) => {
+            const deadline = toolDeadline(abortSignal, FETCH_TIMEOUT_MS);
 
             try {
-                const response = await fetchWithSsrfGuard(url, controller.signal);
+                const response = await fetchWithSsrfGuard(url, deadline.signal);
 
                 if (!response.ok) {
+                    await response.body?.cancel();
                     throw new Error(`Requisição falhou com status ${response.status} ${response.statusText}`);
                 }
 
                 const contentType = response.headers.get("content-type") ?? "";
-                const buffer = await response.arrayBuffer();
-
-                if (buffer.byteLength > MAX_RESPONSE_BYTES) {
-                    throw new Error(
-                        `Resposta tem ${buffer.byteLength} bytes, acima do limite de ${MAX_RESPONSE_BYTES} bytes`
-                    );
-                }
-
-                const raw = Buffer.from(buffer).toString("utf-8");
+                const raw = await boundedResponseText(response, MAX_RESPONSE_BYTES, deadline.signal);
                 const isHtml = contentType.includes("text/html");
                 let content = isHtml ? stripHtml(raw) : raw;
 
@@ -190,7 +188,7 @@ export function createWebFetchTool() {
                     truncated
                 };
             } finally {
-                clearTimeout(timeout);
+                deadline.dispose();
             }
         }
     });

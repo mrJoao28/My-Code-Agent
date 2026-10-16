@@ -19,10 +19,10 @@ export function createGitLogTool(cwd: string) {
                 .describe(`Número máximo de commits a retornar. Padrão: ${DEFAULT_LIMIT}, máximo: ${MAX_LIMIT}`),
             path: z.string().optional().describe("Limita o histórico a um arquivo ou pasta específica")
         }),
-        execute: async ({ limit, path }) => {
-            await assertGitRepo(cwd);
+        execute: async ({ limit, path }, { abortSignal }) => {
+            await assertGitRepo(cwd, abortSignal);
 
-            const files = await safeTrackedFiles(cwd, path);
+            const files = await safeTrackedFiles(cwd, path, abortSignal);
             if (files.length === 0) return { commits: [], count: 0 };
             const args = [
                 "log", "--no-ext-diff", "--no-textconv",
@@ -33,7 +33,7 @@ export function createGitLogTool(cwd: string) {
             ];
             args.push("--", ...files);
 
-            const { stdout } = await runGit(cwd, args);
+            const { stdout } = await runGit(cwd, args, 15_000, abortSignal);
 
             const commits = stdout
                 .split("\n")

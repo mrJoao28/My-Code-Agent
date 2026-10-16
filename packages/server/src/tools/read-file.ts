@@ -9,7 +9,7 @@ const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
 
 export function createReadFileTool(cwd: string) {
     return tool({
-        description: `Lê o conteúdo de um arquivo de texto. Conteúdo maior que ${MAX_CONTENT_CHARS} caracteres é truncado. Arquivos maiores que ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB são rejeitados (use grep/offset+limit para arquivos grandes).`,
+        description: `Lê um arquivo de texto de até ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB, retornando até ${MAX_CONTENT_CHARS} caracteres. offset/limit selecionam linhas, mas não removem o limite do arquivo.`,
         inputSchema: z.object({
             path: z.string().describe("Caminho do arquivo, relativo ao diretório de trabalho"),
             offset: z
@@ -25,7 +25,8 @@ export function createReadFileTool(cwd: string) {
                 .optional()
                 .describe("Número máximo de linhas a retornar")
         }),
-        execute: async ({ path, offset, limit }) => {
+        execute: async ({ path, offset, limit }, { abortSignal }) => {
+            abortSignal?.throwIfAborted();
             const resolvedPath = await resolveSafePath(cwd, path);
 
             const handle = await open(resolvedPath, "r");
@@ -39,14 +40,21 @@ export function createReadFileTool(cwd: string) {
 
                 if (info.size > MAX_FILE_SIZE_BYTES) {
                     throw new Error(
-                        `Arquivo "${path}" tem ${info.size} bytes, acima do limite de ${MAX_FILE_SIZE_BYTES} bytes. Use offset/limit ou a tool grep em vez de ler o arquivo inteiro.`
+                        `FILE_TOO_LARGE: arquivo "${path}" tem ${info.size} bytes, acima do limite de ${MAX_FILE_SIZE_BYTES} bytes. Forneça um trecho menor; offset/limit não removem esse limite.`
                     );
                 }
 
              
                 const buffer = Buffer.alloc(info.size);
-                await handle.read(buffer, 0, info.size, 0);
-                const raw = buffer.toString("utf-8");
+                let bytesRead = 0;
+                while (bytesRead < buffer.length) {
+                    abortSignal?.throwIfAborted();
+                    const chunk = await handle.read(buffer, bytesRead, Math.min(32_768, buffer.length - bytesRead), bytesRead);
+                    if (!chunk.bytesRead) break;
+                    bytesRead += chunk.bytesRead;
+                }
+                abortSignal?.throwIfAborted();
+                const raw = buffer.subarray(0, bytesRead).toString("utf-8");
 
                 let lines = raw.split("\n");
                 const totalLines = lines.length;

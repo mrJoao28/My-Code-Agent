@@ -16,15 +16,19 @@ export function unexpiredSessionFilter(now = new Date()) {
 // Renova antes da leitura, somente dentro do prazo: uma sessão já expirada
 // não pode ser reativada entre duas execuções da limpeza.
 export async function loadSessionForUse(db: SessionDatabase, sessionId: string, now = new Date()) {
-    const updated = await db.session.updateMany({
-        where: { id: sessionId, ...unexpiredSessionFilter(now) },
-        data: { updatedAt: now },
-    });
-    if (updated.count === 0) return null;
+    if (!await markSessionUsed(db, sessionId, now)) return null;
     return db.session.findUnique({
         where: { id: sessionId },
         include: { messages: { orderBy: { createdAt: "asc" } } },
     });
+}
+
+export async function markSessionUsed(db: SessionDatabase, sessionId: string, now = new Date()) {
+    const updated = await db.session.updateMany({
+        where: { id: sessionId, ...unexpiredSessionFilter(now) },
+        data: { updatedAt: now },
+    });
+    return updated.count > 0;
 }
 
 export async function deleteInactiveSessions(db: SessionDatabase, now = new Date()) {

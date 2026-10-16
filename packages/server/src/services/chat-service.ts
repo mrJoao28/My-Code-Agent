@@ -4,11 +4,12 @@ import { db } from "@myagent/database";
 import { Mode, MessageStatus } from "@myagent/database";
 import type { ChatStreamEvent } from "@myagent/shared";
 import { isModelConfigured, isSupportedChatModel } from "../lib/models";
-import { buildConversationHistory, getResumableUserMessage, touchSession } from "./message-service";
+import { touchSession } from "./message-service";
 import { streamAIResponse } from "./stream-service";
 import { logger } from "../lib/logger";
 import { authorizeWorkspace } from "../security/workspaces";
-import { loadSessionForUse } from "./session-lifecycle";
+import { markSessionUsed } from "./session-lifecycle";
+import { fitContextWindow, refreshSessionContext } from "./session-context";
 
 const activeResumeSessionIds = new Set<string>();
 
@@ -22,24 +23,24 @@ async function writeSseError(stream: Parameters<Parameters<typeof streamSSE>[1]>
 export async function handleResume(c: Context) {
   const sessionId = c.req.param("sessionId");
   if (!sessionId) return c.json({ error: "Session id is required" }, 400);
-  const session = await loadSessionForUse(db, sessionId);
-  if (!session) return c.json({ error: "Session not found" }, 404);
+  if (activeResumeSessionIds.has(sessionId)) return c.json({ error: "Session already has an active generation" }, 409);
+  activeResumeSessionIds.add(sessionId);
+  try {
+  if (!await markSessionUsed(db, sessionId)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
+  const session = await db.session.findUnique({ where: { id: sessionId } });
+  if (!session) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
 
   if (session.cwd) await authorizeWorkspace(session.cwd);
-  const resumableMessage = getResumableUserMessage(session.messages);
-  if (!resumableMessage) return c.json({ error: "Session has no pending user message to resume" }, 409);
-  if (!isSupportedChatModel(resumableMessage.model)) return c.json({ error: `Session uses unsupported model: ${resumableMessage.model}` }, 409);
-  if (!isModelConfigured(resumableMessage.model)) return c.json({ error: "MODEL_API_KEY_REQUIRED", model: resumableMessage.model }, 428);
-  if (activeResumeSessionIds.has(sessionId)) return c.json({ error: "Session already has an active generation" }, 409);
-
-  activeResumeSessionIds.add(sessionId);
-  const history = buildConversationHistory(session.messages);
+  const resumableMessage = await db.message.findFirst({ where: { sessionId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+  if (!resumableMessage || resumableMessage.role !== "USER") { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session has no pending user message to resume" }, 409); }
+  if (!isSupportedChatModel(resumableMessage.model)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: `Session uses unsupported model: ${resumableMessage.model}` }, 409); }
+  if (!isModelConfigured(resumableMessage.model)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "MODEL_API_KEY_REQUIRED", model: resumableMessage.model }, 428); }
+  const history = await refreshSessionContext(db, sessionId, c.req.raw.signal);
   const abortController = new AbortController();
-  try {
     return streamSSE(c, async (stream) => {
       stream.onAbort(() => abortController.abort());
       try {
-        await streamAIResponse(stream, { sessionId, model: resumableMessage.model, history, mode: resumableMessage.mode, abortController, cwd: session.cwd });
+        await streamAIResponse(stream, { sessionId, model: resumableMessage.model, history, mode: resumableMessage.mode, abortController, cwd: session.cwd, requestSignal: c.req.raw.signal });
       } finally {
         activeResumeSessionIds.delete(sessionId);
       }
@@ -51,6 +52,7 @@ export async function handleResume(c: Context) {
     });
   } catch (e) {
     activeResumeSessionIds.delete(sessionId);
+    if (e instanceof Error && e.message.startsWith("CONTEXT_MESSAGE_TOO_LARGE")) return c.json({ error: e.message }, 413);
     throw e;
   }
 }
@@ -72,7 +74,9 @@ export async function handleSubmit(c: Context, data: SubmitBody) {
   activeResumeSessionIds.add(sessionId);
 
   try {
-    const session = await loadSessionForUse(db, sessionId);
+    fitContextWindow([{ role: "user", content: data.content }]);
+    if (!await markSessionUsed(db, sessionId)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
+    const session = await db.session.findUnique({ where: { id: sessionId } });
     if (!session) {
       activeResumeSessionIds.delete(sessionId);
       return c.json({ error: "Session not found" }, 404);
@@ -84,13 +88,13 @@ export async function handleSubmit(c: Context, data: SubmitBody) {
     // subia na listagem (ordenada por atividade recente) assim que o
     // usuário mandava uma nova mensagem. Veja touchSession em message-service.ts.
     await touchSession(sessionId);
-    const history = buildConversationHistory([...session.messages, { role: "USER" as const, content: data.content, status: MessageStatus.COMPLETE }]);
+    const history = await refreshSessionContext(db, sessionId, c.req.raw.signal);
     const abortController = new AbortController();
 
     return streamSSE(c, async (stream) => {
       stream.onAbort(() => abortController.abort());
       try {
-        await streamAIResponse(stream, { sessionId, model: data.model, history, mode: data.mode, abortController, cwd: session.cwd });
+        await streamAIResponse(stream, { sessionId, model: data.model, history, mode: data.mode, abortController, cwd: session.cwd, requestSignal: c.req.raw.signal });
       } finally {
         activeResumeSessionIds.delete(sessionId);
       }
@@ -102,6 +106,7 @@ export async function handleSubmit(c: Context, data: SubmitBody) {
     });
   } catch (e) {
     activeResumeSessionIds.delete(sessionId);
+    if (e instanceof Error && e.message.startsWith("CONTEXT_MESSAGE_TOO_LARGE")) return c.json({ error: e.message }, 413);
     throw e;
   }
 }

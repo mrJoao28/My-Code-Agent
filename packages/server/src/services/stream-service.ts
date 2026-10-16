@@ -8,6 +8,8 @@ import { buildSystemPrompt } from "../prompts";
 import { createTools, GLOBAL_GENERATION_TIMEOUT_MS, ToolCallGuard, ToolLoopDetectedError } from "./tool-service";
 import { extractFullText, serializeParts } from "./message-format";
 import { logger } from "../lib/logger";
+import type { ModelMessage } from "ai";
+import { persistSessionContext, refreshSessionContext } from "./session-context";
 
 const MAX_STEPS = 50;
 
@@ -16,28 +18,40 @@ type StreamSSEArg = Parameters<Parameters<typeof import("hono/streaming").stream
 export type StreamParams = {
     sessionId: string;
     model: string;
-    history: { role: "user" | "assistant"; content: string }[];
+    history: ModelMessage[];
     mode: Mode;
     abortController: AbortController;
     cwd: string | null;
+    requestSignal?: AbortSignal;
 };
 
 export type StreamDependencies = {
-    db: Pick<PrismaClient, "message">;
+    db: Pick<PrismaClient, "message" | "sessionContext">;
     touchSession: (sessionId: string) => Promise<void>;
     resolveModel: typeof resolveChatModel;
     generate: typeof aiStreamText;
+    saveContext: (messages: ModelMessage[], signal: AbortSignal) => Promise<ModelMessage[]>;
+    refreshContext: () => Promise<unknown>;
 };
 export async function streamAIResponse(stream: StreamSSEArg, params: StreamParams, dependencies: Partial<StreamDependencies> = {}): Promise<void> {
     const db = dependencies.db ?? (await import("@myagent/database")).db;
     const touchSession = dependencies.touchSession ?? (await import("./message-service")).touchSession;
     const { sessionId, model, history, mode, abortController, cwd } = params;
+    const abortRequest = () => abortController.abort(params.requestSignal?.reason);
+    params.requestSignal?.addEventListener("abort", abortRequest, { once: true });
+    if (params.requestSignal?.aborted) abortRequest();
+    const saveContext = dependencies.saveContext ?? ((messages, signal) => persistSessionContext(db, sessionId, messages, signal));
+    const refreshContext = dependencies.refreshContext ?? (() => refreshSessionContext(db, sessionId));
+    const refreshAfterPersistence = async () => {
+        try { await refreshContext(); }
+        catch { logger.warn({ sessionId, event: "context_refresh_failed" }, "Context will be rebuilt from persisted messages before the next generation"); }
+    };
     const startTime = Date.now();
     const toolGuard = new ToolCallGuard();
     const tools = cwd ? createTools(cwd, mode, sessionId, {
         beforeExecute: (name, input) => {
             try { toolGuard.register(name, input); }
-            catch (error) { abortController.abort(); throw error; }
+            catch (error) { abortController.abort(error); throw error; }
         },
         notify: async event => { await stream.writeSSE({ event: event.type, data: JSON.stringify(event) }); },
     }) : undefined;
@@ -48,7 +62,7 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
 
     const globalTimeout = setTimeout(() => {
         logger.warn({ sessionId, event: "global_generation_timeout" }, "Generation exceeded global timeout");
-        abortController.abort();
+        abortController.abort(new Error("GENERATION_TIMEOUT: limite de cinco minutos excedido"));
     }, GLOBAL_GENERATION_TIMEOUT_MS);
 
 
@@ -74,10 +88,23 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
         });
         messagePersisted = true;
         await touchSession(sessionId);
+        await refreshAfterPersistence();
+    };
+
+    const persistAndSignalInterruption = async () => {
+        await persistInterruptedMessage();
+        if (!stream.aborted) {
+            const reason = abortController.signal.reason;
+            const message = reason instanceof ToolLoopDetectedError || reason instanceof Error && reason.message.startsWith("GENERATION_TIMEOUT:")
+                ? reason.message : "Geração interrompida.";
+            const event: ChatStreamEvent = { type: "error", message };
+            await stream.writeSSE({ event: "error", data: JSON.stringify(event) });
+        }
     };
 
     let detachProviderAbort: (() => void) | undefined;
     try {
+        abortController.signal.throwIfAborted();
         const resolvedModel = (dependencies.resolveModel ?? resolveChatModel)(model);
         if (resolvedModel.abortSignal) {
             const providerSignal = resolvedModel.abortSignal;
@@ -89,12 +116,14 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
         const configuredTools = tools && resolvedModel.toolOptions
             ? Object.fromEntries(Object.entries(tools).map(([name, definition]) => [name, { ...definition, providerOptions: resolvedModel.toolOptions }]))
             : tools;
+        abortController.signal.throwIfAborted();
         const result = (dependencies.generate ?? aiStreamText)({
             model: resolvedModel.model,
-            system: buildSystemPrompt({ cwd: cwd ?? "", mode }),
+            system: buildSystemPrompt({ cwd: cwd ?? "", mode, availableTools: Object.keys(configuredTools ?? {}), sandboxConfigured: Boolean(process.env.MYAGENT_SANDBOX_IMAGE) }),
             tools: configuredTools,
             stopWhen: tools ? stepCountIs(MAX_STEPS) : undefined,
             messages: history,
+            prepareStep: async ({ messages }) => ({ messages: await saveContext(messages, abortController.signal) }),
             abortSignal: abortController.signal,
             providerOptions: resolvedModel.providerOptions,
             maxRetries: resolvedModel.maxRetries,
@@ -207,7 +236,7 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
         }
 
         if (stream.aborted || abortController.signal.aborted) {
-            await persistInterruptedMessage();
+            await persistAndSignalInterruption();
             return;
         }
 
@@ -230,6 +259,7 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
         });
         messagePersisted = true;
         await touchSession(sessionId);
+        await refreshAfterPersistence();
 
         logger.info(
             {
@@ -256,7 +286,7 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
             return;
         }
         if (abortController.signal.aborted) {
-            await persistInterruptedMessage();
+            await persistAndSignalInterruption();
             return;
         }
 
@@ -271,15 +301,18 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
                 status: MessageStatus.COMPLETE,
                 model,
                 content: message,
+                parts: serializeParts(parts),
                 totalTokens,
                 mode
             }
         });
         await touchSession(sessionId);
+        await refreshAfterPersistence();
 
         const errorEvent: ChatStreamEvent = { type: "error", message };
         await stream.writeSSE({ event: "error", data: JSON.stringify(errorEvent) });
     } finally {
+        params.requestSignal?.removeEventListener("abort", abortRequest);
         detachProviderAbort?.();
         clearTimeout(globalTimeout);
     }

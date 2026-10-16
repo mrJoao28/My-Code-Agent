@@ -36,8 +36,19 @@ model Session {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   messages Message[]
+  context SessionContext?
   @@index([userId])
   @@index([updatedAt])
+}
+
+model SessionContext {
+  sessionId String @id
+  messages Json @default("[]")
+  tokenLimit Int @default(16384)
+  estimatedTokens Int @default(0)
+  truncated Boolean @default(false)
+  updatedAt DateTime @updatedAt
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }
 
 model Message {

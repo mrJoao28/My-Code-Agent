@@ -8,6 +8,8 @@ function setup(parts: unknown[], controller = new AbortController()) {
     const dependencies: StreamDependencies = {
         db: { message: { create } } as unknown as StreamDependencies["db"],
         touchSession: mock(async () => {}),
+        saveContext: async messages => messages,
+        refreshContext: mock(async () => {}),
         resolveModel: (() => ({ model: {}, provider: "ollama", modelId: "fixture" })) as unknown as StreamDependencies["resolveModel"],
         generate: (() => ({ fullStream: (async function* () {
             for (const part of parts) {
@@ -29,6 +31,20 @@ test("usage accumulates every model step once and survives persistence", async (
     await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
     expect(fixture.created[0]!.totalTokens).toBe(3_500);
     expect(fixture.events.filter(event => event.event === "usage").map(event => JSON.parse(event.data).totalTokens)).toEqual([1_200, 3_500]);
+});
+
+test("every model step uses the snapshot returned by context persistence", async () => {
+    const fixture = setup([]);
+    const saved = [{ role: "user" as const, content: "persisted bounded context" }];
+    fixture.dependencies.saveContext = mock(async () => saved);
+    fixture.dependencies.generate = ((options: Parameters<StreamDependencies["generate"]>[0]) => ({ fullStream: (async function* () {
+        const step = await options.prepareStep!({ messages: fixture.params.history } as Parameters<NonNullable<typeof options.prepareStep>>[0]);
+        expect(step?.messages).toEqual(saved);
+        yield { type: "text-delta", text: "answer" };
+    })() })) as unknown as StreamDependencies["generate"];
+    await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+    expect(fixture.dependencies.saveContext).toHaveBeenCalledTimes(1);
+    expect(fixture.dependencies.refreshContext).toHaveBeenCalledTimes(1);
 });
 
 test.each(["abort", "failure"])("reported usage is retained after %s even without text", async ending => {
@@ -104,6 +120,27 @@ test("model-resolution failure is handled inside the generation lifecycle", asyn
     fixture.dependencies.resolveModel = () => { throw new Error("unsupported fixture model"); };
     await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
     expect(fixture.created[0]).toMatchObject({ role: "ERROR", content: "unsupported fixture model" });
+});
+
+test("request cancellation before generation prevents the model call", async () => {
+    const fixture = setup([]);
+    const request = new AbortController(); request.abort(new Error("fixture cancelled"));
+    fixture.params.requestSignal = request.signal;
+    const generate = mock(() => { throw new Error("unexpected model call"); }); fixture.dependencies.generate = generate as unknown as StreamDependencies["generate"];
+    await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+    expect(generate).not.toHaveBeenCalled();
+    expect(fixture.created).toHaveLength(0);
+});
+
+test("generation limit preserves partial output and signals its cause", async () => {
+    const fixture = setup([]);
+    fixture.dependencies.generate = (() => ({ fullStream: (async function* () {
+        yield { type: "text-delta", text: "partial" };
+        fixture.params.abortController.abort(new Error("GENERATION_TIMEOUT: fixture limit"));
+    })() })) as unknown as StreamDependencies["generate"];
+    await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+    expect(fixture.created[0]).toMatchObject({ status: "INTERRUPTED", content: "partial" });
+    expect(JSON.parse(fixture.events.at(-1)!.data)).toEqual({ type: "error", message: "GENERATION_TIMEOUT: fixture limit" });
 });
 
 test("provider account cancellation reaches the generation and preserves partial output as interrupted", async () => {

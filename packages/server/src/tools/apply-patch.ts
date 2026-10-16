@@ -32,16 +32,17 @@ export function createApplyPatchTool(cwd: string) {
     return tool({
         description: "Aplica diff unificado a arquivos seguros do workspace, com aprovação. Não aceita binários, links, rename/copy ou paths com espaços.",
         inputSchema: z.object({ patch: z.string().max(500_000), checkOnly: z.boolean().optional() }),
-        execute: async ({ patch, checkOnly }) => {
+        execute: async ({ patch, checkOnly }, { abortSignal }) => {
+            abortSignal?.throwIfAborted();
             await validatePatchPaths(cwd, patch);
-            await assertGitRepo(cwd);
+            await assertGitRepo(cwd, abortSignal);
             const temporary = join(tmpdir(), "myagent-patch-" + randomUUID() + ".diff");
             await writeFile(temporary, patch, { flag: "wx", mode: 0o600, encoding: "utf8" });
             try {
-                await runGit(cwd, ["apply", "--check", "--whitespace=nowarn", temporary]);
+                await runGit(cwd, ["apply", "--check", "--whitespace=nowarn", temporary], 15_000, abortSignal);
                 if (!checkOnly) {
                     await validatePatchPaths(cwd, patch);
-                    await runGit(cwd, ["apply", "--whitespace=nowarn", temporary]);
+                    await runGit(cwd, ["apply", "--whitespace=nowarn", temporary], 15_000, abortSignal);
                 }
                 return { applied: !checkOnly, valid: true };
             } finally { await unlink(temporary).catch(() => {}); }

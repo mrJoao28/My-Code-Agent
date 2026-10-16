@@ -6,6 +6,7 @@ import type { Message, Session } from "../generated/prisma/client";
 import { DEFAULT_CHAT_MODEL_ID } from "../../shared/src";
 import { createSessionRoutes } from "../../server/src/routes/sessions";
 import { deleteInactiveSessions, loadSessionForUse, SESSION_RETENTION_MS } from "../../server/src/services/session-lifecycle";
+import { refreshSessionContext, persistSessionContext, DEFAULT_CONTEXT_TOKEN_LIMIT } from "../../server/src/services/session-context";
 
 const connectionString = process.env.MYAGENT_TEST_DATABASE_URL;
 type SessionHistory = Session & { messages: Message[] };
@@ -18,6 +19,38 @@ function client() {
     return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 }
 const headers = { "Content-Type": "application/json" };
+
+test.skipIf(!connectionString)("PostgreSQL Docker: context survives reload, preserves results and cascades", async () => {
+    const db = client(), reader = client();
+    const ids = [`context-${randomUUID()}`, `context-${randomUUID()}`];
+    try {
+        const response = await app(db).request("http://127.0.0.1:3000/", { method: "POST", headers, body: JSON.stringify({ title: "Context fixture" }) });
+        expect(response.status).toBe(201);
+        ids[0] = (await response.json() as SessionHistory).id;
+        expect(await db.sessionContext.findUnique({ where: { sessionId: ids[0]! } })).toMatchObject({ tokenLimit: DEFAULT_CONTEXT_TOKEN_LIMIT, messages: [] });
+        await db.session.create({ data: { id: ids[1]!, title: "Other session", userId: "local-user" } });
+        const time = Date.now();
+        await db.message.create({ data: { sessionId: ids[0]!, role: "USER", status: "COMPLETE", model: DEFAULT_CHAT_MODEL_ID, mode: "PLAN", content: "inspect", createdAt: new Date(time) } });
+        await db.message.create({ data: { sessionId: ids[0]!, role: "ASSISTANT", status: "INTERRUPTED", model: DEFAULT_CHAT_MODEL_ID, mode: "PLAN", content: "", createdAt: new Date(time + 1), parts: [
+            { type: "tool-call", id: "fixture-call", name: "read_file", args: { path: "a.txt" } },
+            { type: "tool-result", id: "fixture-call", name: "read_file", result: "persistent result" },
+        ] } });
+        const snapshot = await refreshSessionContext(db, ids[0]!);
+        expect(JSON.stringify(snapshot)).toContain("persistent result");
+        await db.$disconnect();
+        expect((await reader.sessionContext.findUnique({ where: { sessionId: ids[0]! } }))!.messages).toEqual(JSON.parse(JSON.stringify(snapshot)));
+        await persistSessionContext(reader, ids[1]!, [
+            { role: "user", content: "old" }, { role: "assistant", content: "x".repeat(60_000) }, { role: "user", content: "latest" },
+        ]);
+        expect((await reader.sessionContext.findUnique({ where: { sessionId: ids[1]! } }))!.estimatedTokens).toBeLessThanOrEqual(DEFAULT_CONTEXT_TOKEN_LIMIT);
+        expect((await reader.sessionContext.findUnique({ where: { sessionId: ids[0]! } }))!.messages).toEqual(JSON.parse(JSON.stringify(snapshot)));
+        await reader.session.delete({ where: { id: ids[0]! } });
+        expect(await reader.sessionContext.findUnique({ where: { sessionId: ids[0]! } })).toBeNull();
+    } finally {
+        try { await reader.session.deleteMany({ where: { id: { in: ids } } }); }
+        finally { await Promise.all([db.$disconnect(), reader.$disconnect()]); }
+    }
+}, 20_000);
 
 test.skipIf(!connectionString)("PostgreSQL Docker: retention honors the ten-day boundary, renewal and message cascade", async () => {
     const db = client();

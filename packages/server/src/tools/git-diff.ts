@@ -16,16 +16,16 @@ export function createGitDiffTool(cwd: string) {
                 .optional()
                 .describe("Limita o diff a um arquivo ou pasta específica, relativo ao diretório de trabalho")
         }),
-        execute: async ({ staged, path }) => {
-            await assertGitRepo(cwd);
+        execute: async ({ staged, path }, { abortSignal }) => {
+            await assertGitRepo(cwd, abortSignal);
 
-            const files = await safeTrackedFiles(cwd, path);
+            const files = await safeTrackedFiles(cwd, path, abortSignal);
             if (files.length === 0) return { diff: "(sem diferenças)", truncated: false };
             const args = ["diff", "--ignore-submodules=all", "--no-ext-diff", "--no-textconv", "--relative"];
             if (staged) args.push("--staged");
             args.push("--", ...files);
 
-            const { stdout } = await runGit(cwd, args);
+            const { stdout } = await runGit(cwd, args, 15_000, abortSignal);
             const { text, truncated } = truncateOutput(stdout);
 
             return {

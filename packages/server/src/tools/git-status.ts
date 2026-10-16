@@ -23,10 +23,10 @@ export function createGitStatusTool(cwd: string) {
         description:
             "Mostra o estado atual do repositório git: branch, arquivos modificados/adicionados/removidos/não rastreados (staged e não staged separadamente), e se há commits à frente/atrás do upstream.",
         inputSchema: z.object({}),
-        execute: async () => {
-            await assertGitRepo(cwd);
+        execute: async (_, { abortSignal }) => {
+            await assertGitRepo(cwd, abortSignal);
 
-            const { stdout } = await runGit(cwd, ["status", "--ignore-submodules=all", "--porcelain=v1", "--branch", "--", "."]);
+            const { stdout } = await runGit(cwd, ["status", "--ignore-submodules=all", "--porcelain=v1", "--branch", "--", "."], 15_000, abortSignal);
             const lines = stdout.split("\n").filter(Boolean);
 
             const branchLine = lines.find((l) => l.startsWith("##"));

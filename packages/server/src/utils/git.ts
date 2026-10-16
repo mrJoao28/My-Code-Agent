@@ -11,7 +11,8 @@ export function gitEnvironment(): NodeJS.ProcessEnv {
     for (const name of ["PATH", "Path", "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"]) if (process.env[name]) env[name] = process.env[name];
     return env;
 }
-async function assertMetadata(cwd: string, initializing: boolean): Promise<void> {
+async function assertMetadata(cwd: string, initializing: boolean, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     const directory = join(cwd, ".git");
     try {
         const root = await lstat(directory);
@@ -23,6 +24,7 @@ async function assertMetadata(cwd: string, initializing: boolean): Promise<void>
     let visited = 0;
     const walk = async (path: string): Promise<void> => {
         for (const entry of await readdir(path, { withFileTypes: true })) {
+            signal?.throwIfAborted();
             if (++visited > 20_000) throw new GitError("Metadata Git excede o limite de validação.");
             const file = join(path, entry.name), info = await lstat(file);
             if (info.isSymbolicLink() || info.isFile() && info.nlink > 1
@@ -34,10 +36,10 @@ async function assertMetadata(cwd: string, initializing: boolean): Promise<void>
     };
     await walk(directory);
 }
-export async function runGit(cwd: string, args: string[], timeoutMs = 15_000): Promise<{ stdout: string; stderr: string }> {
+export async function runGit(cwd: string, args: string[], timeoutMs = 15_000, signal?: AbortSignal): Promise<{ stdout: string; stderr: string }> {
     const nullPath = process.platform === "win32" ? "NUL" : "/dev/null";
     try {
-        await assertMetadata(cwd, args[0] === "init");
+        await assertMetadata(cwd, args[0] === "init", signal);
         const scope = ["--git-dir=" + join(cwd, ".git"), "--work-tree=" + cwd];
         // A repository can configure clean/process filters invoked by git add.
         // Read only their names, then override every driver before any operation.
@@ -45,7 +47,7 @@ export async function runGit(cwd: string, args: string[], timeoutMs = 15_000): P
         try {
             if (args[0] === "init") throw Object.assign(new Error("initializing"), { code: 1 });
             const listed = await execFileAsync("git", [...scope, "config", "--null", "--name-only", "--get-regexp", "^filter\\."],
-                { cwd, timeout: 5_000, windowsHide: true, env: gitEnvironment(), maxBuffer: 100_000 });
+                { cwd, timeout: 5_000, windowsHide: true, env: gitEnvironment(), maxBuffer: 100_000, signal });
             const drivers = new Set(listed.stdout.split("\0").filter(Boolean).map(key => key.slice(0, key.lastIndexOf("."))));
             filterOverrides = [...drivers].flatMap(driver => ["-c", driver + ".clean=", "-c", driver + ".smudge=", "-c", driver + ".process=", "-c", driver + ".required=false"]);
         } catch (error) {
@@ -56,24 +58,26 @@ export async function runGit(cwd: string, args: string[], timeoutMs = 15_000): P
             "-c", "core.attributesFile=" + nullPath, "-c", "commit.gpgSign=false",
             "-c", "log.showSignature=false", "-c", "submodule.recurse=false", "-c", "credential.helper=",
             "-c", "diff.external=", "-c", "protocol.allow=never", ...filterOverrides, ...args],
-            { cwd, timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024, windowsHide: true, env: gitEnvironment() });
+            { cwd, timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024, windowsHide: true, env: gitEnvironment(), signal });
         return { stdout, stderr };
     } catch (error) {
+        signal?.throwIfAborted();
         const err = error as { killed?: boolean; stderr?: string; message?: string };
         throw new GitError(err.killed ? "Tempo limite do Git excedido" : err.stderr?.trim() || err.message || "Falha ao executar Git");
     }
 }
-export async function assertGitRepo(cwd: string): Promise<void> {
-    await runGit(cwd, ["rev-parse", "--is-inside-work-tree"], 5_000);
+export async function assertGitRepo(cwd: string, signal?: AbortSignal): Promise<void> {
+    await runGit(cwd, ["rev-parse", "--is-inside-work-tree"], 5_000, signal);
 }
 export function truncateOutput(text: string, max = 20_000) {
     return { text: text.slice(0, max), truncated: text.length > max };
 }
-export async function safeTrackedFiles(cwd: string, path?: string): Promise<string[]> {
+export async function safeTrackedFiles(cwd: string, path?: string, signal?: AbortSignal): Promise<string[]> {
     if (path) await resolveSafePath(cwd, path, { mustExist: false });
-    const { stdout } = await runGit(cwd, ["ls-files", "-z", "--", path ?? "."]);
+    const { stdout } = await runGit(cwd, ["ls-files", "-z", "--", path ?? "."], 15_000, signal);
     const files: string[] = [];
     for (const file of stdout.split("\0").filter(Boolean)) {
+        signal?.throwIfAborted();
         try { await resolveSafePath(cwd, file, { mustExist: false }); files.push(file); }
         catch (error) { if (!(error instanceof UnsafePathError)) throw error; }
     }
