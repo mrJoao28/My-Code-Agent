@@ -51,3 +51,25 @@ test("capabilities never advertise tools without a workspace or invent omitted t
     const limited = buildSystemPrompt({ cwd: "/fixture", mode: "BUILD", availableTools: ["read_file"] });
     expect(limited).not.toMatch(/write_file|edit_file|apply_patch|git_commit/);
 });
+
+test("BUILD requires folder instructions, applied-change summaries and a root instruction map", () => {
+    const prompt = buildSystemPrompt({ cwd: "/fixture", mode: "BUILD" });
+    expect(prompt).toContain("leia o AGENTS.md da raiz");
+    expect(prompt).toContain("Em cada pasta onde criar ou alterar código, crie ou atualize o AGENTS.md local");
+    expect(prompt).toContain("RESUME.md nessa mesma pasta");
+    expect(prompt).toContain("preserve registros anteriores");
+    expect(prompt).toContain("se não existir, crie-o");
+    expect(prompt).toContain("apenas um mapa dos demais AGENTS.md");
+    expect(prompt).toContain("links relativos");
+    expect(prompt).toContain("RESUME.md da raiz");
+    expect(prompt).toContain("Não descarte instruções preexistentes");
+    expect(prompt).toContain("sem workspace ou permissão de escrita, informe a limitação");
+});
+
+test("PLAN does not instruct the model to create folder documentation", () => {
+    const prompt = buildSystemPrompt({ cwd: "/fixture", mode: "PLAN" });
+    expect(prompt).not.toContain("RESUME.md");
+    expect(prompt).not.toContain("crie ou atualize o AGENTS.md");
+    expect(prompt).not.toContain("apenas um mapa dos demais AGENTS.md");
+    expect(prompt).toContain("Não modifique arquivos");
+});
