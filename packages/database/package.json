@@ -8,9 +8,8 @@
     },
     "scripts": {
         "db.generate": "bunx prisma generate",
-        "db.migrate": "bunx prisma migrate dev",
-        "db.deploy": "bunx prisma migrate deploy",
-        "db.push": "bunx prisma db push",
+        "db.migrate": "bun src/migrate.ts",
+        "db.deploy": "bun src/migrate.ts",
         "db.studio": "bunx prisma studio"
     },
     "devDependencies": {
@@ -18,7 +17,9 @@
         "prisma": "7.4.0"
     },
     "dependencies": {
-        "@prisma/adapter-pg": "7.4.0",
+        "@myagent/shared": "workspace:*",
+        "@prisma/adapter-libsql": "7.4.0",
+        "@libsql/client": "^0.15.15",
         "@prisma/client": "7.4.0",
         "dotenv": "^17.4.2"
     }

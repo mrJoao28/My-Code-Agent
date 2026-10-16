@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { Prisma } from "@myagent/database";
 import { createSessionRoutes } from "./routes/sessions";
-import { db } from "@myagent/database";
+import { db, initializeDatabase, closeDatabase } from "@myagent/database";
 import { bodyLimit } from "hono/body-limit";
 import { ensureLocalToken, localAuthentication } from "./security/auth";
 import { createPermissionRoutes } from "./routes/permissions";
@@ -12,9 +12,19 @@ import models from "./routes/models";
 import { createChatGPTRoutes } from "./routes/chatgpt";
 import { logger, generateRequestId } from "./lib/logger";
 import { startSessionCleanup } from "./services/session-lifecycle";
+import { SessionBusyError, SessionLeases } from "./services/session-lease";
+import { setChatSessionLeases } from "./services/chat-service";
+import { setRuntimeWorkspace, validateSessionWorkspace } from "./security/workspaces";
+import { workspaceTitle } from "./utils/workspace";
+import { cancelAllGenerations } from "./services/stream-service";
+import { loadGlobalConfig } from "./lib/env";
+import { checkDocker, setDockerAvailable, isDockerAvailable } from "./security/sandbox";
+import { chatGPT } from "./lib/chatgpt";
+declare const MYAGENT_BUNDLED: boolean;
 
+export function createApp(token: string, leases?: SessionLeases) {
 const app = new Hono<{ Variables: { requestId: string } }>();
-app.use("*", localAuthentication(ensureLocalToken()));
+app.use("*", localAuthentication(token));
 app.use("*", bodyLimit({ maxSize: 1024 * 1024 }));
 
 app.use(async (c, next) => {
@@ -40,6 +50,7 @@ app.use(async (c, next) => {
 
 app.onError((error, c) => {
   const requestId = c.get("requestId") ?? "unknown";
+  if (error instanceof SessionBusyError) return c.json({ error: error.message }, 409);
   if (error instanceof UnsafePathError) return c.json({ error: error.message }, 403);
   if (error instanceof PathNotFoundError) return c.json({ error: error.message }, 404);
 
@@ -92,19 +103,63 @@ app.onError((error, c) => {
 });
 
 const routes = app
-  .route("/session", createSessionRoutes(db))
+  .get("/runtime", c => c.json({ dockerAvailable: isDockerAvailable() }))
+  .route("/session", createSessionRoutes(db, undefined, leases))
   .route("/chat", chat)
   .route("/models", models)
   .route("/chatgpt", createChatGPTRoutes())
   .route("/permissions", createPermissionRoutes());
 
-export type AppType = typeof routes;
-
-if (import.meta.main) {
-  // Bun --hot reavalia o módulo; cancela o timer anterior antes de substituí-lo.
-  const runtime = globalThis as typeof globalThis & { stopMyagentSessionCleanup?: () => void };
-  runtime.stopMyagentSessionCleanup?.();
-  runtime.stopMyagentSessionCleanup = startSessionCleanup(db);
+return routes;
 }
 
-export default { hostname: "127.0.0.1", port: 3000, fetch: app.fetch, idleTimeout: 255 };
+export type AppType = ReturnType<typeof createApp>;
+
+export async function startServer(options: { port?: number; token: string; workspace: string; sessionId?: string; onLockLost?: () => void; dockerAvailable?: boolean; signal?: AbortSignal; development?: boolean }) {
+  const workspace = await workspaceTitle(options.workspace);
+  const docker = options.dockerAvailable ?? await checkDocker(options.signal);
+  setDockerAvailable(docker);
+  if (!options.development) setRuntimeWorkspace(workspace);
+  const leases = new SessionLeases(db, () => { void cancelAllGenerations(); options.onLockLost?.(); });
+  let stopCleanup: (() => void) | undefined;
+  try {
+    if (options.sessionId) {
+      const session = await db.session.findUnique({ where: { id: options.sessionId } });
+      if (!session) throw new Error("Sessão não encontrada.");
+      await validateSessionWorkspace(session, workspace);
+      await leases.acquire(options.sessionId);
+    }
+    const app = createApp(options.token, leases);
+    const server = Bun.serve({ hostname: "127.0.0.1", port: options.port ?? 0, fetch: app.fetch, idleTimeout: 255 });
+    setChatSessionLeases(leases);
+    leases.start();
+    stopCleanup = startSessionCleanup(db);
+    let stopping: Promise<void> | undefined;
+    return { server, url: `http://127.0.0.1:${server.port}`, leases, dockerAvailable: docker,
+      stop() {
+        return stopping ??= (async () => {
+          stopCleanup?.();
+          chatGPT.cancelLogin();
+          try { await cancelAllGenerations(); await server.stop(true); }
+          finally { await leases.close(); setChatSessionLeases(undefined); setRuntimeWorkspace(undefined); setDockerAvailable(false); }
+        })();
+      },
+    };
+  } catch (error) { stopCleanup?.(); await leases.close(); setRuntimeWorkspace(undefined); throw error; }
+}
+
+if (import.meta.main && (typeof MYAGENT_BUNDLED === "undefined" || !MYAGENT_BUNDLED)) {
+  loadGlobalConfig();
+  const runtime = globalThis as typeof globalThis & { stopMyagentServer?: () => Promise<void> };
+  await runtime.stopMyagentServer?.();
+  await initializeDatabase();
+  const running = await startServer({ port: 3000, token: ensureLocalToken(), workspace: process.cwd(), development: true });
+  const stop = async () => {
+    process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop);
+    await running.stop(); await closeDatabase();
+  };
+  runtime.stopMyagentServer = stop;
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  console.log(`API local em ${running.url}`);
+}

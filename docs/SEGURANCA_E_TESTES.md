@@ -6,13 +6,15 @@ um agente local de um usuário; não é um serviço multiusuário.
 
 ## API e configuração
 
-O servidor escuta somente em 127.0.0.1:3000. Todas as rotas, inclusive modelos,
+O launcher escuta somente em 127.0.0.1, numa porta livre; o modo de desenvolvimento
+usa a porta 3000. Todas as rotas, inclusive modelos,
 chat, sessões e aprovações, exigem Authorization: Bearer com um token local.
 Requisições com Origin de navegador ou Host externo são recusadas. O corpo das
 requisições tem limite de 1 MiB.
 
-Ao iniciar, o servidor cria um token aleatório em ~/.myagent/api-token. A CUI lê
-esse mesmo arquivo automaticamente, sem exibir ou enviar o token ao modelo.
+O launcher gera um token aleatório em memória por execução e o entrega à CUI.
+No desenvolvimento, o servidor cria o token em ~/.myagent/api-token e a CUI o lê,
+sem exibir ou enviar o token ao modelo.
 Em POSIX, o diretório é criado com 0700 e o arquivo com 0600; no Windows, mantenha
 o diretório no perfil privado do usuário, protegido pelas ACLs do sistema.
 Links e arquivos de token com múltiplos hard links são recusados.
@@ -23,21 +25,25 @@ Variáveis opcionais:
 | --- | --- |
 | MYAGENT_API_TOKEN | Substitui o token do arquivo; mínimo de 32 caracteres alfanuméricos, _ ou - |
 | MYAGENT_CONFIG_DIR | Diretório privado do arquivo de autenticação; padrão ~/.myagent |
+| MYAGENT_HOME | Diretório global do banco, chaves, modelos e preferências; precede MYAGENT_CONFIG_DIR |
 | MYAGENT_WORKSPACE_ROOTS | Array JSON de diretórios absolutos autorizados; padrão: diretório de execução do servidor |
-| MYAGENT_SANDBOX_IMAGE | Imagem Docker Linux local e confiável para bash e type_check |
+| MYAGENT_SANDBOX_IMAGE | Override da imagem padrão oven/bun:1.3.13; pull na primeira execução aprovada |
 | MYAGENT_TEST_DOCKER_IMAGE | Imagem local para executar os testes reais de container |
 | API_URL | URL HTTP de loopback da API para a CUI; destinos remotos são recusados |
 
-Para trabalhar em vários projetos, configure as raízes no ambiente do servidor.
-Exemplo PowerShell:
+Para trabalhar em outro projeto com o launcher, abra aquela pasta e execute
+`myagent`. O servidor embutido autoriza somente o workspace escolhido. Exemplo
+de variável de desenvolvimento (não amplia o workspace fixado pelo launcher):
 
 ~~~powershell
 $env:MYAGENT_WORKSPACE_ROOTS='["C:/projetos"]'
 bun run dev:server
 ~~~
 
-Criar uma sessão e executar uma ferramenta revalidam a autorização do workspace.
-Sessões antigas também são verificadas antes de iniciar uma nova geração.
+Criar/carregar uma sessão e executar uma ferramenta revalidam a autorização do
+workspace. Carregamento e chat comparam workspacePath e proprietário local.
+Locks entre processos ficam no SQLite com heartbeat e expiração; locks em memória
+continuam protegendo gerações concorrentes dentro do processo.
 A CUI deve rodar no mesmo usuário do servidor, ou usar o mesmo token configurado
 explicitamente. Para rotacionar o token, substitua-o de forma privada e reinicie
 servidor e cliente.
@@ -62,12 +68,17 @@ Erros de ferramenta, incluindo negação, são associados à chamada no stream.
 
 ## Isolamento de comandos
 
-Não existe fallback para shell do host. Sem imagem configurada, bash e type_check
-retornam erro. A imagem deve existir localmente: a execução usa --pull=never.
+Não existe fallback para shell do host. A inicialização verifica Docker com
+timeout/cancelamento. Sem Docker, bash, type_check e test_run não são registrados;
+a interface avisa que comandos estão desativados. A primeira execução aprovada
+baixa a imagem padrão ou configurada se necessário, mostrando progresso. Depois
+da preparação, o container usa --pull=never e roda sem rede.
 
 O servidor cria um snapshot temporário filtrado do projeto, sem credenciais,
 metadata Git, node_modules ou symlinks. Esse snapshot é o único bind mount e fica
-somente leitura. O container não recebe o socket Docker nem variáveis do servidor.
+somente leitura. Arquivos acima de 5 MiB e diretórios de build são omitidos; a
+leitura impõe limite de 200 MiB e 20 mil entradas. O container não recebe o socket
+Docker nem variáveis do servidor.
 
 O container usa rede desativada, root filesystem somente leitura, usuário não
 root, capabilities removidas, no-new-privileges e limites de CPU/memória/processos.
@@ -135,9 +146,9 @@ bun test
 bun run typecheck
 ~~~
 
-A geração Prisma usa DATABASE_URL na configuração. Pode ser uma URL fictícia
-para geração/typecheck; esses comandos não precisam conectar ao banco.
-Os testes normais usam arquivos temporários, banco/IA simulados e rede simulada.
+A geração Prisma não exige DATABASE_URL e não aplica migrations. O runtime usa
+SQLite/libsql em ~/.myagent/myagent.db, com override por MYAGENT_HOME.
+Os testes normais usam SQLite em memória/arquivos temporários, IA e rede simuladas.
 Eles não chamam providers nem usam créditos. Os testes de processo/Git executam
 binários locais com comandos fixos em fixtures, não comandos produzidos por IA.
 
@@ -145,6 +156,10 @@ Cobertura funcional incluída:
 
 - Schemas de mensagens, catálogo e configuração de modelos, gravação de ambiente.
 - Sessões: listagem, histórico, criação, validação e workspace autorizado.
+- SQLite: baseline, reexecução idempotente, rollback, enums/JSON e cascatas.
+- Launcher: argumentos, porta livre, autenticação e liberação dos locks.
+- Workspace: raiz Git/subpastas, espaços, caixa Windows e recusa de junctions.
+- Docker: ferramentas omitidas sem daemon, pull sob demanda e falha de rede simulada.
 - Geração: deltas, partes, persistência, interrupção, erros e associação de tools.
 - CUI: leitura SSE fragmentada, aprovação, validação e EOF sem conclusão.
 - Arquivos: criação, leitura, limites, edição, backup, move e delete.

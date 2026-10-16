@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
-import { writeFile, readdir, mkdir, symlink } from "node:fs/promises";
+import { writeFile, readdir, mkdir, symlink, open } from "node:fs/promises";
 import { join } from "node:path";
-import { runProcess, dockerArguments, snapshotWorkspace, runSandboxCommand } from "./sandbox";
+import { runProcess, dockerArguments, snapshotWorkspace, runSandboxCommand, SNAPSHOT_FILE_LIMIT } from "./sandbox";
 import { withFixture } from "../test-support";
 test("snapshot omits secrets, links and host dependency executables", withFixture(async ({ cwd, outside, root }) => {
     await writeFile(join(cwd, "safe.ts"), "safe");
@@ -9,6 +9,9 @@ test("snapshot omits secrets, links and host dependency executables", withFixtur
     await writeFile(join(cwd, "api-token"), "fixture-secret");
     await mkdir(join(cwd, ".git")); await writeFile(join(cwd, ".git/config"), "private");
     await mkdir(join(cwd, "node_modules")); await writeFile(join(cwd, "node_modules/program"), "private");
+    await mkdir(join(cwd, "build")); await writeFile(join(cwd, "build/output"), "generated");
+    const large = await open(join(cwd, "large.bin"), "w");
+    try { await large.truncate(SNAPSHOT_FILE_LIMIT + 1); } finally { await large.close(); }
     await symlink(outside, join(cwd, "external"), process.platform === "win32" ? "junction" : "dir");
     const snapshot = join(root, "snapshot");
     await snapshotWorkspace(cwd, snapshot);

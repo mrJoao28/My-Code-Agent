@@ -4,17 +4,20 @@
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
+    "build": "bun run --cwd packages/database db.generate && bun run --cwd packages/myagent build",
     "dev:cli": "bun --env-file=.env --watch packages/cui/src/index.tsx",
     "dev:server": "bun run --hot packages/server/src/index.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/database/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/cui/tsconfig.json",
+    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/database/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/cui/tsconfig.json && tsc --noEmit -p packages/myagent/tsconfig.json",
     "test:integration": "bun scripts/test-integration.ts",
-    "test:database": "bun scripts/test-database-integration.ts",
-    "db:up": "docker compose up -d --wait postgres",
-    "db:stop": "docker compose stop postgres"
+    "test:database": "bun test packages/database/src"
   },
   "devDependencies": {
+    "@myagent/cui": "workspace:*",
+    "@myagent/server": "workspace:*",
+    "@myagent/database": "workspace:*",
+    "@myagent/shared": "workspace:*",
     "@types/bun": "1.3.14",
     "typescript": "5.9.3"
   },

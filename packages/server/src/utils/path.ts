@@ -38,7 +38,10 @@ function assertNames(path: string): void {
 
 export async function resolveSafePath(cwd: string, targetPath: string, options: { mustExist?: boolean } = {}): Promise<string> {
     if (targetPath.includes("\0") || (win32.isAbsolute(targetPath) && !isAbsolute(targetPath))) throw new UnsafePathError(targetPath);
-    const root = await realpath(cwd);
+    const canonicalRoot = await realpath(cwd);
+    // Bun no Windows pode retornar "C:" para realpath("C:\\").
+    // Preserve a raiz absoluta para não resolver o volume relativo ao cwd.
+    const root = /^[A-Za-z]:$/.test(canonicalRoot) ? canonicalRoot + "\\" : canonicalRoot;
     if (!(await lstat(root)).isDirectory()) throw new UnsafePathError(cwd);
     const target = resolve(root, targetPath);
     if (!isInside(root, target)) throw new UnsafePathError(targetPath);

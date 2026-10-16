@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useLocation, useNavigate } from "react-router";
 import { z } from "zod";
 import prettyMs from "pretty-ms";
-import { MessageStatus } from "@myagent/database";
+import { MessageStatus } from "@myagent/database/enums";
 import { messagePartsSchema, type SupportedChatModelId } from "@myagent/shared";
 import type { InferResponseType } from "hono";
 import { ApprovalPanel } from "../components/approval-panel";
@@ -114,6 +114,7 @@ function SessionChat({ session }: { session: SessionData }) {
 
     return (
         <SessionShell
+            title={session.title}
             onSubmit={(text) => submit({ userText: text, mode, model })}
             loading={streaming.status === "streaming"}
             interruptible={streaming.status === "streaming"}

@@ -25,8 +25,9 @@ em caso de erro e não mantém o processo aberto só pelo timer. Ao recarregar o
 servidor com Bun `--hot`, o timer anterior é cancelado. Não há serviço externo nem
 cron do sistema; a política se aplica às sessões no banco configurado da API local.
 
-Foi adicionada a migration `20261016000000_session_retention`, que cria um índice
-em `Session.updatedAt`. Ela não exclui registros. Após conferir o banco-alvo:
+O índice de `Session.updatedAt` agora integra a baseline SQLite. A migration
+PostgreSQL `20261016000000_session_retention` está arquivada. Para abrir e migrar
+o banco SQLite local, após conferir MYAGENT_HOME:
 
 ```sh
 bun run --cwd packages/database db.deploy
@@ -34,5 +35,5 @@ bun run --cwd packages/database db.deploy
 
 Os testes normais simulam o banco e o agendamento. Cobrem o prazo, a renovação antes
 da leitura, sessões expiradas ou removidas, autenticação, falhas, repetição e
-cancelamento do timer. O teste PostgreSQL de retenção e exclusão em cascata fica
-na integração isolada `bun run test:database`; sem configuração, ele é ignorado.
+cancelamento do timer. A retenção e a exclusão em cascata também são verificadas
+em SQLite temporário em `bun run test:database`, sem Docker nem configuração extra.

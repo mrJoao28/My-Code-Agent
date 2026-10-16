@@ -2,6 +2,7 @@
   "name": "@myagent/cui",
   "module": "src/index.tsx",
   "type": "module",
+  "exports": { ".": "./src/index.tsx" },
   "private": true,
   "scripts": {
     "dev": "bun run --watch src/index.tsx"

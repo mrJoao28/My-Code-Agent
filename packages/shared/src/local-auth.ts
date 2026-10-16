@@ -1,9 +1,9 @@
-import { homedir } from "node:os";
+import { myagentHome } from "./home";
 import { join } from "node:path";
 import { lstatSync, readFileSync } from "node:fs";
 
 export function localTokenPath(): string {
-    return join(process.env.MYAGENT_CONFIG_DIR || join(homedir(), ".myagent"), "api-token");
+    return join(myagentHome(), "api-token");
 }
 export function readLocalToken(path = localTokenPath()): string {
     if (process.env.MYAGENT_API_TOKEN) return validateToken(process.env.MYAGENT_API_TOKEN);

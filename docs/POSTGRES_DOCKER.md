@@ -1,5 +1,10 @@
 # PostgreSQL local no Docker
 
+> Documento histórico. PostgreSQL e compose foram retirados do fluxo ativo.
+> Use [SQLite e CLI global](CLI_GLOBAL.md). Os comandos abaixo descrevem a
+> configuração antiga; não são instruções de instalação da versão atual.
+> Dados/volumes antigos não são apagados nem importados automaticamente.
+
 O `compose.yaml` cria um PostgreSQL 16 com volume persistente, healthcheck e porta
 publicada apenas em `127.0.0.1`. Os outros containers da máquina não são alterados.
 O backend e a CUI continuam executando no host com Bun.

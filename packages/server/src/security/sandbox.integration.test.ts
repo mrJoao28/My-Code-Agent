@@ -1,12 +1,13 @@
 import { test, expect } from "bun:test";
 import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { runSandboxCommand } from "./sandbox";
+import { runSandboxCommand, setDockerAvailable, isDockerAvailable } from "./sandbox";
 import { withFixture } from "../test-support";
 
 const image = process.env.MYAGENT_TEST_DOCKER_IMAGE;
 test.skipIf(!image)("real Docker: secrets, host environment, writes and network are isolated", withFixture(async ({ cwd }) => {
     const previousImage = process.env.MYAGENT_SANDBOX_IMAGE;
+    const available = isDockerAvailable(); setDockerAvailable(true);
     const previousProbe = process.env.MYAGENT_LEAK_PROBE;
     process.env.MYAGENT_SANDBOX_IMAGE = image!;
     process.env.MYAGENT_LEAK_PROBE = "fixture-secret";
@@ -34,15 +35,17 @@ test.skipIf(!image)("real Docker: secrets, host environment, writes and network 
         expect(result.stdout).toContain("isolated");
         expect(await readFile(join(cwd, ".env"), "utf8")).toBe("fixture-secret");
     } finally {
+        setDockerAvailable(available);
         if (previousImage === undefined) delete process.env.MYAGENT_SANDBOX_IMAGE; else process.env.MYAGENT_SANDBOX_IMAGE = previousImage;
         if (previousProbe === undefined) delete process.env.MYAGENT_LEAK_PROBE; else process.env.MYAGENT_LEAK_PROBE = previousProbe;
     }
 }), 30_000);
 test.skipIf(!image)("real Docker: timed out container is stopped", withFixture(async ({ cwd }) => {
     const previous = process.env.MYAGENT_SANDBOX_IMAGE;
+    const available = isDockerAvailable(); setDockerAvailable(true);
     process.env.MYAGENT_SANDBOX_IMAGE = image!;
     try {
         const result = await runSandboxCommand(cwd, "sleep 30", 1000);
         expect(result.timedOut).toBe(true); expect(result.exitCode).toBe(124);
-    } finally { if (previous === undefined) delete process.env.MYAGENT_SANDBOX_IMAGE; else process.env.MYAGENT_SANDBOX_IMAGE = previous; }
+    } finally { setDockerAvailable(available); if (previous === undefined) delete process.env.MYAGENT_SANDBOX_IMAGE; else process.env.MYAGENT_SANDBOX_IMAGE = previous; }
 }), 20_000);

@@ -17,7 +17,7 @@ export function buildSystemPrompt({ cwd, mode, availableTools = [], sandboxConfi
         mode === "PLAN" ? PLAN_MODE_TEXT : BUILD_MODE_TEXT,
         cwd ? buildCwdNote(cwd) : "Sem workspace autorizado.",
         `Ferramentas disponíveis: ${tools.length ? tools.join(", ") : "nenhuma"}.`,
-        `Sandbox declarada: ${sandboxConfigured ? "imagem configurada; funcionamento ainda depende da verificação" : "imagem não configurada; processos indisponíveis"}.`,
+        `Sandbox declarada: ${sandboxConfigured ? "Docker disponível; a imagem será verificada antes da execução" : "imagem não configurada; processos indisponíveis. Docker indisponível: não há execução de comandos; não tente shell, typecheck ou testes executáveis"}.`,
         EXECUTION_RULES_TEXT,
         "Limites: 40 chamadas, até três chamadas idênticas e cinco minutos por geração. Resultados truncados não representam todo o conteúdo.",
     ].join("\n");

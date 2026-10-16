@@ -1,220 +1,85 @@
 # My-Code-Agent
 
-> A terminal-based AI coding agent built with Bun, TypeScript, React/OpenTUI, Hono, Vercel AI SDK and Prisma/PostgreSQL.
+Assistente de programação no terminal, com Bun, React/OpenTUI, Hono, AI SDK e Prisma/SQLite local. O comando `myagent` abre o agente na pasta atual e retoma a sessão mais recente daquele workspace.
 
-My-Code-Agent is an AI coding assistant that runs directly in the terminal. It combines a terminal UI with a Hono backend, persistent sessions/messages, multiple AI providers, streaming responses, tool use and two execution modes: **PLAN** and **BUILD**.
+## Instalação
 
-## ✨ Features
+Requer **Bun >= 1.3.13** disponível no PATH. Instale o Bun seguindo https://bun.sh.
 
-### 🤖 Multi-provider AI
+Após a publicação do pacote no npm:
 
-The project has a provider resolver that supports multiple Anthropic, OpenAI, Google and Ollama models. Models are centrally registered in `packages/shared/src/models.ts`, including provider and pricing metadata.
-
-### 💬 Interactive coding sessions
-
-- Create new sessions with a title and working directory.
-- Persist sessions and messages in PostgreSQL through Prisma.
-- Load previous sessions and their complete message history.
-- Associate each message with its model and execution mode.
-- Store assistant message parts such as reasoning, text, tool calls and tool results.
-- Track generation duration and interrupted generations.
-
-### ⚡ Streaming AI responses
-
-AI responses are streamed to the terminal using **Server-Sent Events (SSE)**.
-
-The stream can expose reasoning deltas, text deltas, tool calls, tool results, completion events and error events. The client can interrupt an active generation with `Esc`.
-
-### 🛠️ Coding tools
-
-**Read-only tools:** `read_file`, `list_directory`, `glob`, `grep`, `web_search`, `web_fetch`, `git_status`, `git_diff`, `git_log`, `type_check` and `todo_write`.
-
-**BUILD-only tools:** `write_file`, `edit_file`, `delete_file`, `move_file`, `apply_patch`, `bash` and `git_commit`.
-
-### 🧭 PLAN and BUILD modes
-
-**PLAN** is designed for analysis and planning and exposes only read-oriented coding tools. **BUILD** adds file modification, shell execution and Git commit tools.
-
-The system prompt is generated dynamically according to the selected mode and working directory.
-
-### 🛡️ Tool-loop protection
-
-The backend protects generations from runaway tool execution:
-
-- Maximum of **40 tool calls** per generation.
-- Maximum of **3 identical repetitions** of the same tool call and arguments.
-- Global generation timeout of **5 minutes**.
-- Active generation tracking prevents concurrent generation/resume requests for the same session.
-
-### ⏸️ Resume and interruption handling
-
-If a generation is interrupted, its partial response can be persisted with `INTERRUPTED` status. Sessions can later use the resume endpoint to continue a resumable user request.
-
-### 🧩 Runtime validation
-
-Zod is used across the API and shared package to validate chat requests, session creation requests, supported models, tool-call arguments, message parts and SSE chat events.
-
-### 🖥️ Terminal UI
-
-The CLI is built with **React + OpenTUI** and uses React Router for navigation. Current screens/routes are `/`, `/sessions/new` and `/sessions/:id`.
-
----
-
-## 🏗️ Architecture
-
-The project is organized as a Bun workspace/monorepo:
-
-```text
-My-Code-Agent/
-├── package.json
-├── README.md
-└── packages/
-    ├── cui/          # Terminal UI
-    ├── server/       # HTTP API + AI orchestration
-    ├── database/     # Prisma + PostgreSQL
-    └── shared/       # Shared models, schemas and types
+```sh
+npm i -g my-code-agent
+cd meu-projeto
+myagent
 ```
 
-### Request flow
+O pacote usa `#!/usr/bin/env bun`; npm instala o comando, mas não instala o runtime Bun. No Windows, o npm cria o shim `myagent.cmd`. A pasta de executáveis globais do npm precisa estar no PATH.
 
-```text
-Terminal UI
-    │
-    │ POST /chat/:sessionId
-    ▼
-Hono API
-    │
-    ├── Validate request with Zod
-    ▼
-Chat Service
-    │
-    ├── Load session/history
-    ├── Resolve selected AI model
-    ├── Build system prompt
-    ├── Create tools according to PLAN/BUILD
-    ▼
-AI SDK
-    │
-    ├── Stream reasoning/text
-    ├── Execute tools
-    └── Stream tool results
-    ▼
-SSE → Terminal UI
-    │
-    ▼
-Persist assistant message in PostgreSQL
-```
+**Docker é opcional para abrir o aplicativo.** Sem Docker ativo, a interface avisa que os comandos estão desativados. Shell, typecheck e execução de testes exigem Docker, aprovação e sandbox; não existe fallback no host.
 
----
+## Comandos
 
-## 🔌 API
+| Comando | Comportamento |
+| --- | --- |
+| `myagent` | Retoma a última sessão da pasta ou cria uma |
+| `myagent --new` | Cria outra sessão na mesma pasta |
+| `myagent resume` | Escolhe uma sessão da pasta; permite listar todas |
+| `myagent resume --all` | Lista sessões de todas as pastas para escolha |
+| `myagent doctor` | Verifica Bun, diretório global, SQLite, Docker, imagem e nomes das chaves necessárias |
+| `myagent --version` | Exibe a versão |
+| `myagent --help` | Exibe a ajuda |
 
-The server runs on port **3000**.
+Dentro de um repositório Git, o workspace é sua raiz, mesmo ao abrir uma subpasta. Fora de Git, é a pasta atual. O caminho canônico identifica o workspace; no Windows, a chave fica em minúsculas. O título exibido é o caminho absoluto. Links/junctions são recusados.
 
-### Sessions
+Sessões da mesma pasta podem coexistir. A mesma sessão não pode ser usada por dois processos: um lock no SQLite tem heartbeat a cada 5 segundos e expira em 30 segundos se o processo parar. Sessões sem atividade por dez dias continuam sujeitas à política de retenção.
 
-- `GET /session` — returns sessions ordered by most recent activity.
-- `GET /session/:id` — returns a session and its messages.
-- `POST /session` — creates a new session and optionally an initial message.
+## Configuração e dados locais
 
-### Chat
+Tudo fica em `~/.myagent/`, com override por `MYAGENT_HOME`:
 
-- `POST /chat/:sessionId` — submits a user message and starts an SSE AI generation.
-- `POST /chat/:sessionId/resume` — attempts to resume a session containing a pending/resumable user message.
+- `myagent.db`: banco SQLite local, com WAL, migrations automáticas e histórico de mensagens/parts.
+- `config.env`: chaves e configuração do Ollama salvas pela interface; não compartilhe esse arquivo.
+- `models.json`: modelos personalizados.
+- `preferences.json`: tema da interface.
+- `chatgpt-credentials.json`: credenciais da conta conectada, quando utilizada.
+- `api-token`: token persistido somente no modo de desenvolvimento; o launcher usa um token aleatório em memória por execução.
 
----
+`DATABASE_URL` e PostgreSQL não são necessários. Variáveis do ambiente têm precedência sobre `config.env`. Consulte `.env.example` para nomes públicos; nunca versione chaves. No Windows, proteja o diretório global pelas ACLs do perfil do usuário.
 
-## ⚙️ Requirements
+A imagem padrão da sandbox é `oven/bun:1.3.13`, configurável por `MYAGENT_SANDBOX_IMAGE`. O aplicativo faz pull somente na primeira execução aprovada que precisar da imagem. Ela contém Bun; compiladores e dependências específicos do projeto podem exigir uma imagem personalizada. O container roda sem rede, com snapshot filtrado somente leitura e arquivos temporários em `/tmp`.
 
-Before running the project, install:
+## Desenvolvimento
 
-- Bun
-- PostgreSQL
-- Docker Engine/Desktop and a trusted local Linux image for shell/type-check tools
-- An API key for the cloud provider you intend to use, or Ollama for local models
+Use o workspace da raiz e Bun:
 
-The repository is a Bun workspace, so dependencies are managed from the root.
-
-Copy `.env.example` to `.env` and configure the values you need. Cloud model keys follow the naming convention generated by `packages/server/src/lib/model-registry.ts`.
-
-### Ollama
-
-Para conectar um plano ChatGPT pelo navegador ou cadastrar modelos locais, veja [ChatGPT e modelos locais](docs/CHATGPT_E_MODELOS_LOCAIS.md).
-
-For local models, Ollama is configured by default against `http://localhost:11434/v1` and can be overridden with `OLLAMA_BASE_URL` and `OLLAMA_API_KEY`.
-
----
-
-## 🚀 Installation
-
-Clone the repository and install dependencies:
-
-```bash
-git clone https://github.com/mrJoao28/My-Code-Agent.git
-cd My-Code-Agent
-bun install
-```
-
-Generate the Prisma client:
-
-```bash
+```sh
+bun install --frozen-lockfile
 bun run --cwd packages/database db.generate
+bun test
+bun run typecheck
+bun run build
 ```
 
-Copy the environment template and configure PostgreSQL/provider credentials:
+Os comandos anteriores continuam disponíveis em terminais separados:
 
-```bash
-cp .env.example .env
-```
-
-### Running
-
-Start the backend:
-
-```bash
+```sh
 bun run dev:server
-```
-
-Start the terminal client in another terminal:
-
-```bash
 bun run dev:cli
 ```
 
-Run the test suite:
+O servidor de desenvolvimento usa loopback e porta 3000. A CUI aceita `API_URL`. `bun run --cwd packages/database db.migrate` abre e atualiza somente o SQLite local; não usa Prisma CLI em runtime nem recria o banco.
 
-```bash
-bun test
-```
+## Arquitetura e segurança
 
----
+- `packages/myagent`: launcher e pacote npm `my-code-agent`, comando `myagent`.
+- `packages/cui`: interface, foco, diálogos, aprovação e streaming SSE.
+- `packages/server`: API privada, providers, ferramentas e ciclo de geração.
+- `packages/shared`: modelos e contratos de mensagens/eventos.
+- `packages/database`: Prisma 7.4.0, libsql, migrations embutidas e abertura local.
 
-## 🧪 Quality checks
+PLAN continua sem ferramentas que alterem o código. BUILD exige aprovação para alterações e processos. O prompt de BUILD orienta criar instruções e resumos por pasta. A API recusa clientes de navegador, exige token privado e valida o workspace da sessão antes de carregá-la ou continuar uma geração.
 
-The repository includes regression coverage for security, file/Git/web tools, sessions, streaming and generation with mocked providers/database. Before opening a pull request, run:
+As migrations antigas do PostgreSQL estão arquivadas em `packages/database/prisma/migrations-postgres-legacy/`. Dados antigos do PostgreSQL **não são importados**; bancos e volumes existentes não são apagados.
 
-```bash
-bun test
-```
-
----
-
-## 🧱 Database
-
-The Prisma data layer contains `Session` and `Message` entities. Sessions track `createdAt` and `updatedAt`; messages track role, status, model, mode, content, structured parts and generation duration.
-
-Para subir o PostgreSQL local com Docker, aplicar migrations e executar a integração real, veja [PostgreSQL no Docker](docs/POSTGRES_DOCKER.md). Use `bun run db:up` para iniciar e `bun run test:database` para testar em um banco temporário isolado.
-
----
-
-## 🔐 Security notes
-
-BUILD file changes require approval for each action. Shell and type-check commands run only in a configured Docker sandbox, with a filtered read-only snapshot, no network and no server credentials. There is no host-shell fallback. File tools reject paths outside authorized workspaces, links and sensitive credential paths.
-
-The API binds to 127.0.0.1 and requires a local bearer token on every route. The server creates a private token file and the CUI reads it automatically. Workspace roots default to the server working directory and can be configured explicitly. This is a local single-user API; it does not provide multi-user ownership authorization. See [security setup and tests](docs/SEGURANCA_E_TESTES.md) for configuration, behavior changes and limits.
-
----
-
-## 📌 Project status
-
-My-Code-Agent is actively evolving. The architecture intentionally separates the terminal client, API/orchestration layer, persistence and shared contracts so each area can evolve independently.
+Consulte [instalação, empacotamento e publicação](docs/CLI_GLOBAL.md), [segurança e testes](docs/SEGURANCA_E_TESTES.md) e [análise técnica](docs/ANALISE_PROJETO.md).

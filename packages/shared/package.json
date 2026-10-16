@@ -4,7 +4,8 @@
     "private": true,
     "exports": {
         ".": "./src/index.ts",
-        "./local-auth": "./src/local-auth.ts"
+        "./local-auth": "./src/local-auth.ts",
+        "./home": "./src/home.ts"
     },
     "dependencies": {
         "zod": "^4.4.3"

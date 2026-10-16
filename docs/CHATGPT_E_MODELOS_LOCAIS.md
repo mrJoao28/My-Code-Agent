@@ -47,7 +47,7 @@ Esta mudança não adiciona login de assinatura Claude nem altera sua autentica�
 
 O backend guarda o identificador estável da instalação, registros de contas,
 catálogo e tokens em `~/.myagent/chatgpt-credentials.json`, ou no diretório privado
-indicado por `MYAGENT_CONFIG_DIR`. Não são gravados no `.env`, banco de sessões ou
+indicado por `MYAGENT_HOME` (ou pelo alias `MYAGENT_CONFIG_DIR`). Não são gravados no `.env`, banco de sessões ou
 registro de modelos do projeto. No Windows, o diretório deve permanecer no perfil
 privado do usuário, protegido pelas ACLs; em POSIX o arquivo usa permissão 0600.
 Links, junctions e hard links são recusados. A gravação é atômica e usa um lock
@@ -63,7 +63,7 @@ de controle mantêm o token local e a rejeição de clientes de navegador.
 O login não habilita ferramentas adicionais: PLAN/BUILD, aprovações, sandbox
 Docker, limites e cancelamento continuam definidos pelo backend. A Responses API
 usa streaming com `store: false` e ferramentas em namespace. O histórico continua
-no PostgreSQL local. EOF, falha de uso do plano e resposta incompleta não são
+no SQLite local. EOF, falha de uso do plano e resposta incompleta não são
 considerados conclusão bem-sucedida.
 
 ## Verificação

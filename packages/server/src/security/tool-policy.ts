@@ -4,6 +4,7 @@ import { approvals, PermissionDeniedError, toolDecision, type ApprovalEvent, typ
 import { authorizeWorkspace } from "./workspaces";
 
 export type ToolSecurityOptions = {
+    sandboxAvailable?: boolean;
     notify?: (event: ApprovalEvent) => Promise<void>;
     manager?: ApprovalManager;
     beforeExecute?: (name: string, input: unknown) => void;

@@ -6,6 +6,7 @@ import { resolveSafePath, isSensitivePath, UnsafePathError } from "../utils/path
 import { abortable, toolDeadline } from "../lib/tool-io";
 const IGNORED = new Set(["node_modules", ".git", "dist", "build", ".next"]);
 const MAX_MATCHES = 200;
+declare const MYAGENT_BUNDLED: boolean;
 export function createGrepTool(cwd: string, timeoutMs = 15_000) {
     return tool({
         description: "Busca texto ou regex em arquivos seguros; literal=true evita interpretar regex. Exclui links e credenciais. Até 200 resultados, 20 MB lidos e 15 segundos; regex executa em worker cancelável.",
@@ -16,7 +17,7 @@ export function createGrepTool(cwd: string, timeoutMs = 15_000) {
             try {
             deadline.signal.throwIfAborted();
             const root = await resolveSafePath(cwd, path ?? ".");
-            worker = new Worker(new URL("../lib/grep-worker.ts", import.meta.url).href);
+            worker = new Worker(new URL(typeof MYAGENT_BUNDLED !== "undefined" && MYAGENT_BUNDLED ? "./grep-worker.js" : "../lib/grep-worker.ts", import.meta.url).href);
             const matches: { file: string; line: number; text: string }[] = [];
             let visited = 0, limited = false, bytesRead = 0;
             const visit = async (file: string): Promise<void> => {

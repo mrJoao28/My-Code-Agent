@@ -11,8 +11,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    env:
-      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -22,6 +20,7 @@ jobs:
       - run: bun run --cwd packages/database db.generate
       - run: bun run typecheck
       - run: bun test
+      - run: bun run build
   sandbox:
     runs-on: ubuntu-latest
     steps:

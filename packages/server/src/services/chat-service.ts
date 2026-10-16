@@ -7,11 +7,14 @@ import { isModelConfigured, isSupportedChatModel } from "../lib/models";
 import { touchSession } from "./message-service";
 import { streamAIResponse } from "./stream-service";
 import { logger } from "../lib/logger";
-import { authorizeWorkspace } from "../security/workspaces";
+import { validateSessionWorkspace } from "../security/workspaces";
+import type { SessionLeases } from "./session-lease";
 import { markSessionUsed } from "./session-lifecycle";
 import { fitContextWindow, refreshSessionContext } from "./session-context";
 
 const activeResumeSessionIds = new Set<string>();
+let sessionLeases: SessionLeases | undefined;
+export function setChatSessionLeases(leases: SessionLeases | undefined) { sessionLeases = leases; }
 
 export type SubmitBody = { content: string; mode: Mode; model: string };
 
@@ -26,11 +29,12 @@ export async function handleResume(c: Context) {
   if (activeResumeSessionIds.has(sessionId)) return c.json({ error: "Session already has an active generation" }, 409);
   activeResumeSessionIds.add(sessionId);
   try {
-  if (!await markSessionUsed(db, sessionId)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
   const session = await db.session.findUnique({ where: { id: sessionId } });
   if (!session) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
 
-  if (session.cwd) await authorizeWorkspace(session.cwd);
+  await validateSessionWorkspace(session, c.req.header("X-Myagent-Workspace"));
+  await sessionLeases?.acquire(sessionId);
+  if (!await markSessionUsed(db, sessionId)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
   const resumableMessage = await db.message.findFirst({ where: { sessionId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
   if (!resumableMessage || resumableMessage.role !== "USER") { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session has no pending user message to resume" }, 409); }
   if (!isSupportedChatModel(resumableMessage.model)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: `Session uses unsupported model: ${resumableMessage.model}` }, 409); }
@@ -75,14 +79,15 @@ export async function handleSubmit(c: Context, data: SubmitBody) {
 
   try {
     fitContextWindow([{ role: "user", content: data.content }]);
-    if (!await markSessionUsed(db, sessionId)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
     const session = await db.session.findUnique({ where: { id: sessionId } });
     if (!session) {
       activeResumeSessionIds.delete(sessionId);
       return c.json({ error: "Session not found" }, 404);
     }
 
-    if (session.cwd) await authorizeWorkspace(session.cwd);
+    await validateSessionWorkspace(session, c.req.header("X-Myagent-Workspace"));
+    await sessionLeases?.acquire(sessionId);
+    if (!await markSessionUsed(db, sessionId)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
     await db.message.create({ data: { sessionId, role: "USER", status: MessageStatus.COMPLETE, model: data.model, content: data.content, mode: data.mode } });
     // BUGFIX: `Session.updatedAt` nunca era tocado, então a sessão não
     // subia na listagem (ordenada por atividade recente) assim que o

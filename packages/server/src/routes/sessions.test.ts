@@ -11,7 +11,7 @@ function setup(authorize?: (cwd: string) => Promise<string>) {
     const session = {
         updateMany: mock(async ({ where }: { where: { id: string } }) => ({ count: where.id === "s" ? 1 : 0 })),
         findMany: mock(async (_options: unknown) => [{ id: "s", title: "Session" }]),
-        findUnique: mock(async ({ where }: { where: { id: string } }) => where.id === "s" ? { id: "s", messages: [{ id: "m", totalTokens: 1_250 }] } : null),
+        findUnique: mock(async ({ where }: { where: { id: string } }) => where.id === "s" ? { id: "s", userId: "local-user", cwd: process.cwd(), workspacePath: process.platform === "win32" ? process.cwd().toLowerCase() : process.cwd(), messages: [{ id: "m", totalTokens: 1_250 }] } : null),
         create: mock(async ({ data }: { data: unknown }) => ({ id: "created", ...data as object, messages: [] })),
     };
     const db = { session } as unknown as Parameters<typeof createSessionRoutes>[0];
@@ -26,7 +26,7 @@ test("sessions list activity order, load history and return 404", async () => {
     expect(session.findMany.mock.calls[0]).toMatchObject([{ where: { OR: [
         { updatedAt: { gt: expect.any(Date) } },
         { messages: { some: { createdAt: { gt: expect.any(Date) } } } },
-    ] }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true } }]);
+    ], userId: "local-user", workspacePath: expect.any(String) }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true } }]);
     expect(session.updateMany).not.toHaveBeenCalled();
     const history = await app.request("/session/s", { headers });
     expect(history.status).toBe(200);
@@ -46,7 +46,7 @@ test("session creation validates workspace before persistence and preserves init
     const response = await app.request("/session", { method: "POST", headers, body: JSON.stringify({ title: " Session ", cwd, initialMessage }) });
     expect(response.status).toBe(201);
     const data = session.create.mock.calls[0]![0].data as { title: string; cwd: string; userId: string; messages: unknown };
-    expect(data.title).toBe("Session"); expect(data.cwd).toBe(cwd); expect(data.userId).toBe("local-user");
+    expect(data.title).toBe(cwd); expect(data.cwd).toBe(cwd); expect(data.userId).toBe("local-user");
     expect(data.messages).toEqual({ create: { ...initialMessage, status: "COMPLETE" } });
     const rejected = await app.request("/session", { method: "POST", headers, body: JSON.stringify({ title: "Escape", cwd: outside }) });
     expect(rejected.status).toBe(403); expect(session.create).toHaveBeenCalledTimes(1);

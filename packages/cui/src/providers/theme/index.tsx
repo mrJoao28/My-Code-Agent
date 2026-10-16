@@ -1,12 +1,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { myagentHome } from "@myagent/shared/home";
 import { join } from "node:path";
 import { createContext, useCallback, useContext, useState } from "react";
 import type { ReactNode } from "react";
 import type { ThemeColors, Theme } from "../../theme";
 import { THEMES, DEFAULT_THEME } from "../../theme";
 
-const CONFIG_DIR = join(homedir(), ".myAgent");
+const CONFIG_DIR = myagentHome();
 const THEME_PREFERENCES_PATH = join(CONFIG_DIR, "preferences.json");
 
 type ThemePreferences = {

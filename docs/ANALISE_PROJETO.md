@@ -1,5 +1,24 @@
 # Análise técnica do My-Code-Agent
 
+## Atualização de implementação — 16/10/2026
+
+O runtime passou para SQLite local/libsql com Prisma 7.4.0. As migrations
+PostgreSQL foram arquivadas; dados antigos não são importados automaticamente.
+Há runner transacional de SQL embutido e diretório global com MYAGENT_HOME.
+Sessões usam caminho canônico, título com caminho absoluto e lock no SQLite com
+heartbeat. A API valida workspace e proprietário antes de carregar/continuar.
+
+O pacote packages/myagent integra servidor de loopback em porta livre e CUI no
+mesmo processo, com comandos de sessão, ajuda, versão e doctor. O build tem target
+Bun, inclui os pacotes internos e workers, e declara dependências de runtime.
+Docker é opcional para abrir a aplicação; sem ele, ferramentas de processo não
+são registradas. A sandbox continua obrigatória para comandos, sem fallback no
+host. O default é oven/bun:1.3.13, com pull sob demanda após aprovação.
+
+Os detalhes operacionais atuais estão em [CLI_GLOBAL.md](CLI_GLOBAL.md).
+A análise abaixo é a fotografia histórica de 14/10 e pode descrever limitações
+anteriores; não representa o estado atual desses itens.
+
 Data: 14/10/2026. Escopo: fotografia do workspace local, incluindo alterações
 que já existiam antes desta análise.
 

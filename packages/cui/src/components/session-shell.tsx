@@ -6,6 +6,7 @@ import { TokenUsageBar } from "./token-usage-bar";
 import { usePromptConfig } from "../providers/prompt-config";
 
 type Props = {
+    title?: string
     children?: ReactNode
     onSubmit: (text: string) => void
     inputDisabled?: boolean
@@ -15,6 +16,7 @@ type Props = {
 }
 
 export function SessionShell({
+    title,
     children,
     onSubmit,
     inputDisabled = false,
@@ -33,6 +35,7 @@ export function SessionShell({
             paddingX={2}
             gap={1}
         >
+            {title && <text>{title}</text>}
             <scrollbox flexGrow={1} width={"100%"} stickyScroll stickyStart="bottom">
                 <box gap={1}>{children}</box>
             </scrollbox>

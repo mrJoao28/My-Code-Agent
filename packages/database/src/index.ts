@@ -1,2 +1,2 @@
-export {db} from "./client"
+export { db, openDatabase, initializeDatabase, closeDatabase } from "./client"
 export * from "../generated/prisma/client"

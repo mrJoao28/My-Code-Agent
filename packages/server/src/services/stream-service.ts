@@ -10,8 +10,16 @@ import { extractFullText, serializeParts } from "./message-format";
 import { logger } from "../lib/logger";
 import type { ModelMessage } from "ai";
 import { persistSessionContext, refreshSessionContext } from "./session-context";
+import { isDockerAvailable } from "../security/sandbox";
 
 const MAX_STEPS = 50;
+const generations = new Set<{ controller: AbortController; done: Promise<void> }>();
+
+export async function cancelAllGenerations() {
+    const active = [...generations];
+    for (const generation of active) generation.controller.abort(new Error("Aplicação encerrada."));
+    await Promise.all(active.map(generation => generation.done));
+}
 
 type StreamSSEArg = Parameters<Parameters<typeof import("hono/streaming").streamSSE>[1]>[0];
 
@@ -34,6 +42,14 @@ export type StreamDependencies = {
     refreshContext: () => Promise<unknown>;
 };
 export async function streamAIResponse(stream: StreamSSEArg, params: StreamParams, dependencies: Partial<StreamDependencies> = {}): Promise<void> {
+    let finish!: () => void;
+    const generation = { controller: params.abortController, done: new Promise<void>(resolve => { finish = resolve; }) };
+    generations.add(generation);
+    try { await runAIResponse(stream, params, dependencies); }
+    finally { generations.delete(generation); finish(); }
+}
+
+async function runAIResponse(stream: StreamSSEArg, params: StreamParams, dependencies: Partial<StreamDependencies> = {}): Promise<void> {
     const db = dependencies.db ?? (await import("@myagent/database")).db;
     const touchSession = dependencies.touchSession ?? (await import("./message-service")).touchSession;
     const { sessionId, model, history, mode, abortController, cwd } = params;
@@ -119,7 +135,7 @@ export async function streamAIResponse(stream: StreamSSEArg, params: StreamParam
         abortController.signal.throwIfAborted();
         const result = (dependencies.generate ?? aiStreamText)({
             model: resolvedModel.model,
-            system: buildSystemPrompt({ cwd: cwd ?? "", mode, availableTools: Object.keys(configuredTools ?? {}), sandboxConfigured: Boolean(process.env.MYAGENT_SANDBOX_IMAGE) }),
+            system: buildSystemPrompt({ cwd: cwd ?? "", mode, availableTools: Object.keys(configuredTools ?? {}), sandboxConfigured: isDockerAvailable() }),
             tools: configuredTools,
             stopWhen: tools ? stepCountIs(MAX_STEPS) : undefined,
             messages: history,

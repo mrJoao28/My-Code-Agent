@@ -1,5 +1,5 @@
 import { test, expect, mock } from "bun:test";
-import { streamAIResponse, type StreamDependencies, type StreamParams } from "./stream-service";
+import { streamAIResponse, cancelAllGenerations, type StreamDependencies, type StreamParams } from "./stream-service";
 
 function setup(parts: unknown[], controller = new AbortController()) {
     const created: Record<string, unknown>[] = [], events: { event: string; data: string }[] = [];
@@ -21,6 +21,27 @@ function setup(parts: unknown[], controller = new AbortController()) {
     const params: StreamParams = { sessionId: "s", model: "fixture", mode: "PLAN", history: [], cwd: null, abortController: controller };
     return { created, events, dependencies, params, stream, create };
 }
+
+test("application shutdown cancels active generations and waits for cleanup", async () => {
+    const fixture = setup([]);
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    fixture.dependencies.generate = ((options: Parameters<StreamDependencies["generate"]>[0]) => {
+        started();
+        return { fullStream: (async function* () {
+            await new Promise<void>(resolve => {
+                if (options.abortSignal?.aborted) resolve();
+                else options.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
+            });
+        })() };
+    }) as unknown as StreamDependencies["generate"];
+    const running = streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+    await ready;
+    await cancelAllGenerations();
+    await running;
+    expect(fixture.params.abortController.signal.aborted).toBe(true);
+    expect(fixture.events.some(event => event.event === "done")).toBe(false);
+});
 
 test("usage accumulates every model step once and survives persistence", async () => {
     const fixture = setup([

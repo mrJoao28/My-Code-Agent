@@ -1,15 +1,14 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
+  engineType = "client"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
 }
 
 enum Role {
@@ -33,12 +32,22 @@ model Session {
   userId String
   title String
   cwd String?
+  workspacePath String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   messages Message[]
   context SessionContext?
+  lease SessionLease?
   @@index([userId])
   @@index([updatedAt])
+  @@index([workspacePath, updatedAt])
+}
+
+model SessionLease {
+  sessionId String @id
+  owner String
+  expiresAt BigInt
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }
 
 model SessionContext {

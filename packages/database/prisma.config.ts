@@ -1,10 +1,7 @@
-import dotenv from "dotenv";
-import { resolve } from "node:path";
-import { defineConfig, env } from "prisma/config";
-
-dotenv.config({
-  path: resolve(import.meta.dirname, "../../.env"),
-});
+import { defineConfig } from "prisma/config";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { myagentHome } from "@myagent/shared/home";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
@@ -12,6 +9,6 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    url: pathToFileURL(join(myagentHome(), "myagent.db")).href,
   },
 });

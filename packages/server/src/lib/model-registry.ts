@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { myagentHome } from "@myagent/shared/home";
 import { chatGPT } from "./chatgpt";
 import {
   SUPPORTED_CHAT_MODELS,
@@ -11,7 +12,7 @@ export type CustomModel = SupportedChatModelDefinition & {
   apiKeyEnv?: string;
 };
 
-const CONFIG_PATH = join(process.cwd(), ".myagent", "models.json");
+const CONFIG_PATH = join(myagentHome(), "models.json");
 
 export function getModelApiKeyEnv(model: SupportedChatModelDefinition | CustomModel) {
   const custom = "apiKeyEnv" in model ? model.apiKeyEnv : undefined;

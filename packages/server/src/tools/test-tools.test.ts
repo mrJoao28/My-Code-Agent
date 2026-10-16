@@ -12,12 +12,12 @@ import type { CommandResult } from "../security/sandbox";
 const successful: CommandResult = { stdout: "fixture tests passed", stderr: "", exitCode: 0, timedOut: false, truncated: false };
 const names = ["read_files", "project_inspect", "file_outline", "environment_check", "symbol_search", "test_run", "test_discover", "git_show", "git_blame", "diff_summary"];
 test.each(["PLAN", "BUILD"] as const)("new tools have schemas and explicit %s permissions", mode => {
-    const tools = createTools("/fixture", mode, "fixture");
+    const tools = createTools("/fixture", mode, "fixture", { sandboxAvailable: true });
     for (const name of names) {
         expect(name in tools).toBe(true);
         expect(toolDecision(name, mode)).toBe(name === "test_run" ? "approve" : "allow");
     }
-    const runnerSchema = tools.test_run.inputSchema as z.ZodType;
+    const runnerSchema = tools.test_run!.inputSchema as z.ZodType;
     expect(runnerSchema.safeParse({ runner: "sh" }).success).toBe(false);
     expect(runnerSchema.safeParse({ timeoutMs: 120_001 }).success).toBe(false);
     expect(runnerSchema.safeParse({ files: Array(11).fill("a.test.ts") }).success).toBe(false);

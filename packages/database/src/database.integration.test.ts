@@ -1,6 +1,11 @@
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { openDatabase, LocalAdapter } from "./client";
+import { removeTestDatabase } from "./test-cleanup";
 import { PrismaClient } from "../generated/prisma/client";
 import type { Message, Session } from "../generated/prisma/client";
 import { DEFAULT_CHAT_MODEL_ID } from "../../shared/src";
@@ -8,19 +13,17 @@ import { createSessionRoutes } from "../../server/src/routes/sessions";
 import { deleteInactiveSessions, loadSessionForUse, SESSION_RETENTION_MS } from "../../server/src/services/session-lifecycle";
 import { refreshSessionContext, persistSessionContext, DEFAULT_CONTEXT_TOKEN_LIMIT } from "../../server/src/services/session-context";
 
-const connectionString = process.env.MYAGENT_TEST_DATABASE_URL;
+const fixtureHome = mkdtempSync(join(tmpdir(), "myagent-db-integration-"));
+const connectionString = pathToFileURL(join(fixtureHome, "myagent.db")).href;
+beforeAll(async () => { const database = await openDatabase({ home: fixtureHome }); await database.close(); });
+afterAll(() => removeTestDatabase(fixtureHome));
 type SessionHistory = Session & { messages: Message[] };
 function client() {
-    const target = new URL(connectionString!);
-    if (target.protocol !== "postgresql:" || target.hostname !== "127.0.0.1"
-        || target.pathname !== "/myagent_test" || target.username !== "myagent") {
-        throw new Error("A integração exige um banco PostgreSQL local exclusivo chamado myagent_test.");
-    }
-    return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+    return new PrismaClient({ adapter: new LocalAdapter({ url: connectionString }) });
 }
 const headers = { "Content-Type": "application/json" };
 
-test.skipIf(!connectionString)("PostgreSQL Docker: context survives reload, preserves results and cascades", async () => {
+test.skipIf(!connectionString)("SQLite local: context survives reload, preserves results and cascades", async () => {
     const db = client(), reader = client();
     const ids = [`context-${randomUUID()}`, `context-${randomUUID()}`];
     try {
@@ -28,7 +31,7 @@ test.skipIf(!connectionString)("PostgreSQL Docker: context survives reload, pres
         expect(response.status).toBe(201);
         ids[0] = (await response.json() as SessionHistory).id;
         expect(await db.sessionContext.findUnique({ where: { sessionId: ids[0]! } })).toMatchObject({ tokenLimit: DEFAULT_CONTEXT_TOKEN_LIMIT, messages: [] });
-        await db.session.create({ data: { id: ids[1]!, title: "Other session", userId: "local-user" } });
+        await db.session.create({ data: { id: ids[1]!, title: "Other session", userId: "local-user", workspacePath: fixtureHome } });
         const time = Date.now();
         await db.message.create({ data: { sessionId: ids[0]!, role: "USER", status: "COMPLETE", model: DEFAULT_CHAT_MODEL_ID, mode: "PLAN", content: "inspect", createdAt: new Date(time) } });
         await db.message.create({ data: { sessionId: ids[0]!, role: "ASSISTANT", status: "INTERRUPTED", model: DEFAULT_CHAT_MODEL_ID, mode: "PLAN", content: "", createdAt: new Date(time + 1), parts: [
@@ -52,7 +55,7 @@ test.skipIf(!connectionString)("PostgreSQL Docker: context survives reload, pres
     }
 }, 20_000);
 
-test.skipIf(!connectionString)("PostgreSQL Docker: retention honors the ten-day boundary, renewal and message cascade", async () => {
+test.skipIf(!connectionString)("SQLite local: retention honors the ten-day boundary, renewal and message cascade", async () => {
     const db = client();
     const now = new Date();
     const cutoff = new Date(now.getTime() - SESSION_RETENTION_MS);
@@ -62,13 +65,13 @@ test.skipIf(!connectionString)("PostgreSQL Docker: retention honors the ten-day 
     try {
         for (let index = 0; index < 5; index++) {
             await db.session.create({ data: {
-                id: ids[index]!, userId: "local-user", title: "Retention fixture",
+                id: ids[index]!, userId: "local-user", title: "Retention fixture", workspacePath: fixtureHome,
                 createdAt: before, updatedAt: index === 2 || index === 4 ? after : index === 1 ? cutoff : before,
                 messages: { create: { role: "USER", status: "COMPLETE", mode: "PLAN", model: DEFAULT_CHAT_MODEL_ID,
                     content: "Retention fixture", createdAt: index === 3 ? after : before } },
             } });
         }
-        await db.session.create({ data: { id: ids[5]!, userId: "local-user", title: "Empty expired fixture", createdAt: before, updatedAt: before } });
+        await db.session.create({ data: { id: ids[5]!, userId: "local-user", title: "Empty expired fixture", workspacePath: fixtureHome, createdAt: before, updatedAt: before } });
         // Expiração é aplicada também antes do próximo ciclo de limpeza.
         expect(await loadSessionForUse(db, ids[1]!, now)).toBeNull();
         expect(await loadSessionForUse(db, ids[4]!, now)).not.toBeNull();
@@ -95,14 +98,14 @@ function app(db: PrismaClient) {
     return createSessionRoutes(db);
 }
 
-test.skipIf(!connectionString)("PostgreSQL Docker: POST /session persists messages and another client reloads them", async () => {
+test.skipIf(!connectionString)("SQLite local: POST /session persists messages and another client reloads them", async () => {
     const db = client();
     const reader = client();
     let id: string | undefined;
     try {
         const initialMessage = { role: "USER", content: "Mensagem de integração", mode: "PLAN", model: DEFAULT_CHAT_MODEL_ID };
         const response = await app(db).request("http://127.0.0.1:3000/", {
-            method: "POST", headers, body: JSON.stringify({ title: "Integração Docker", initialMessage }),
+            method: "POST", headers, body: JSON.stringify({ title: "Integração SQLite", initialMessage }),
         });
         expect(response.status).toBe(201);
         const session = await response.json() as SessionHistory;
@@ -134,12 +137,12 @@ test.skipIf(!connectionString)("PostgreSQL Docker: POST /session persists messag
     }
 }, 20_000);
 
-test.skipIf(!connectionString)("PostgreSQL Docker: failed transaction does not leave a partial session", async () => {
+test.skipIf(!connectionString)("SQLite local: failed transaction does not leave a partial session", async () => {
     const db = client();
     const id = `integration-${randomUUID()}`;
     try {
         await expect(db.$transaction(async tx => {
-            await tx.session.create({ data: { id, title: "Rollback", userId: "local-user", messages: {
+            await tx.session.create({ data: { id, title: "Rollback", userId: "local-user", workspacePath: fixtureHome, messages: {
                 create: { role: "USER", status: "COMPLETE", model: DEFAULT_CHAT_MODEL_ID, content: "Teste", mode: "PLAN" },
             } } });
             throw new Error("fixture rollback");

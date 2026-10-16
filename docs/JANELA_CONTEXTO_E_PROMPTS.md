@@ -46,7 +46,8 @@ página e 20 mil entradas examinadas; `nextOffset` pressupõe diretório inalter
 Leituras e processos Git recebem cancelamento. Cancelar após uma mutação não
 desfaz efeitos concluídos: confira o resultado antes de tentar novamente.
 
-A migration `20261016010000_session_context` cria a tabela. Após conferir o alvo:
+A tabela de contexto agora integra a baseline SQLite; a migration PostgreSQL
+`20261016010000_session_context` está arquivada. Após conferir MYAGENT_HOME:
 
 ```sh
 bun run --cwd packages/database db.deploy
@@ -54,5 +55,5 @@ bun run --cwd packages/database db.generate
 ```
 
 Testes normais simulam IA e rede. `bun run test:database` valida persistência,
-isolamento entre sessões, recarga e cascata em PostgreSQL temporário do Docker,
+isolamento entre sessões, recarga e cascata em SQLite temporário local,
 sem usar o banco de desenvolvimento ou créditos de IA.

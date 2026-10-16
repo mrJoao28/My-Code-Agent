@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router";
 import { z } from "zod";
-import { Mode } from "@myagent/database";
+import { Mode } from "@myagent/database/enums";
 import type { SupportedChatModelId } from "@myagent/shared";
 import { SessionShell } from "../components/session-shell";
 import { UserrMessage } from "../components/messages";
 import { useToast } from "../providers/toast";
-import { appClient } from "../lib/api-client";
+import { appClient, currentWorkspace } from "../lib/api-client";
 import { getErrorMessage } from "../lib/http-errors";
 
 const newSessionStateSchema = z.object({
@@ -42,8 +42,7 @@ export function NewSession() {
             try {
                 const res = await appClient.session.$post({
                     json: {
-                        title: state.message.slice(0, 100),
-                        cwd: process.cwd(),
+                        cwd: currentWorkspace(),
                         initialMessage: {
                             role: "USER",
                             content: state.message,

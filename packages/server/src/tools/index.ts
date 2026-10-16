@@ -28,15 +28,17 @@ import { createTestDiscoverTool } from "./test-discover";
 import { createGitShowTool } from "./git-show";
 import { createGitBlameTool } from "./git-blame";
 import { createDiffSummaryTool } from "./diff-summary";
+import { isDockerAvailable } from "../security/sandbox";
 
 export function createTools(cwd: string, mode: Mode, sessionId: string, security: ToolSecurityOptions = {}) {
+    const processesEnabled = security.sandboxAvailable ?? isDockerAvailable();
     const readOnlyTools = {
         read_files: createReadFilesTool(cwd),
         project_inspect: createProjectInspectTool(cwd),
         file_outline: createFileOutlineTool(cwd),
         environment_check: createEnvironmentCheckTool(cwd),
         symbol_search: createSymbolSearchTool(cwd),
-        test_run: createTestRunTool(cwd),
+        ...(processesEnabled && { test_run: createTestRunTool(cwd) }),
         test_discover: createTestDiscoverTool(cwd),
         git_show: createGitShowTool(cwd),
         git_blame: createGitBlameTool(cwd),
@@ -50,7 +52,7 @@ export function createTools(cwd: string, mode: Mode, sessionId: string, security
         git_status: createGitStatusTool(cwd),
         git_diff: createGitDiffTool(cwd),
         git_log: createGitLogTool(cwd),
-        type_check: createTypeCheckTool(cwd),
+        ...(processesEnabled && { type_check: createTypeCheckTool(cwd) }),
         todo_write: createTodoWriteTool(sessionId)
     };
 
@@ -65,7 +67,7 @@ export function createTools(cwd: string, mode: Mode, sessionId: string, security
         delete_file: createDeleteFileTool(cwd),
         move_file: createMoveFileTool(cwd),
         apply_patch: createApplyPatchTool(cwd),
-        bash: createBashTool(cwd),
+        ...(processesEnabled && { bash: createBashTool(cwd) }),
         git_commit: createGitCommitTool(cwd)
     }, cwd, mode, sessionId, security);
 }

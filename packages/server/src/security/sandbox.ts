@@ -1,5 +1,5 @@
 import { spawn, execFile } from "node:child_process";
-import { mkdtemp, mkdir, readdir, lstat, copyFile, rm, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, opendir, lstat, open, rm, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -7,6 +7,37 @@ import { isInside, isSensitivePath, resolveSafePath } from "../utils/path";
 
 export type CommandResult = { stdout: string; stderr: string; exitCode: number; timedOut: boolean; truncated: boolean };
 const OUTPUT_LIMIT = 20_000;
+export const DEFAULT_SANDBOX_IMAGE = "oven/bun:1.3.13";
+export const SNAPSHOT_FILE_LIMIT = 5 * 1024 * 1024;
+let dockerAvailable = false;
+export function setDockerAvailable(available: boolean) { dockerAvailable = available; }
+export function isDockerAvailable() { return dockerAvailable; }
+export function sandboxImage() {
+    const image = process.env.MYAGENT_SANDBOX_IMAGE || DEFAULT_SANDBOX_IMAGE;
+    if (!image || image.startsWith("-") || /[\s,]/.test(image)) throw new Error("Imagem de sandbox inválida.");
+    return image;
+}
+export async function checkDocker(signal?: AbortSignal, run = runProcess): Promise<boolean> {
+    try {
+        const result = await run("docker", ["info", "--format", "{{.ServerVersion}}"], { timeoutMs: 3_000, signal });
+        signal?.throwIfAborted();
+        return result.exitCode === 0 && !result.timedOut;
+    } catch (error) { signal?.throwIfAborted(); return false; }
+}
+export async function imagePresent(image = sandboxImage(), signal?: AbortSignal, run = runProcess) {
+    const result = await run("docker", ["image", "inspect", image], { timeoutMs: 3_000, signal });
+    signal?.throwIfAborted();
+    return result.exitCode === 0 && !result.timedOut;
+}
+export async function ensureSandboxImage(image: string, signal?: AbortSignal, run = runProcess, progress = (message: string) => process.stderr.write(message)) {
+    if (await imagePresent(image, signal, run)) return;
+    progress(`Preparando sandbox Docker: baixando ${image}...\n`);
+    const result = await run("docker", ["pull", image], { timeoutMs: 180_000, signal,
+        onOutput: chunk => progress(chunk.slice(0, 2_000)),
+    });
+    signal?.throwIfAborted();
+    if (result.exitCode !== 0 || result.timedOut) throw new Error("Não foi possível baixar a imagem da sandbox. Confira a conexão de rede e o nome da imagem; não há execução no host.");
+}
 
 export async function snapshotWorkspace(cwd: string, destination: string, signal?: AbortSignal): Promise<void> {
     let bytes = 0, files = 0;
@@ -14,19 +45,33 @@ export async function snapshotWorkspace(cwd: string, destination: string, signal
         signal?.throwIfAborted();
         await mkdir(target, { recursive: true, mode: 0o755 });
         await chmod(target, 0o755);
-        for (const entry of await readdir(source, { withFileTypes: true })) {
+        for await (const entry of await opendir(source)) {
             signal?.throwIfAborted();
-            if (isSensitivePath(entry.name) || ["node_modules", "dist", ".dist", "coverage"].includes(entry.name)) continue;
+            if (isSensitivePath(entry.name) || ["node_modules", "dist", ".dist", "build", "out", "target", ".next", ".nuxt", ".cache", ".turbo", "coverage"].includes(entry.name)) continue;
             if (++files > 20_000) throw new Error("Workspace excede o limite de arquivos da sandbox.");
             if (entry.isSymbolicLink()) continue;
             const safe = await resolveSafePath(cwd, join(source, entry.name));
             const info = await lstat(safe);
             if (info.isDirectory()) await visit(safe, join(target, entry.name));
             else if (info.isFile()) {
-                bytes += info.size;
-                if (bytes > 200 * 1024 * 1024) throw new Error("Workspace excede 200 MB para a sandbox.");
+                if (info.size > SNAPSHOT_FILE_LIMIT) continue;
                 const copied = join(target, entry.name);
-                await copyFile(safe, copied);
+                const input = await open(safe, "r");
+                let output: Awaited<ReturnType<typeof open>> | undefined;
+                try {
+                    output = await open(copied, "wx", 0o600);
+                    const buffer = Buffer.alloc(64 * 1024);
+                    let fileBytes = 0;
+                    for (;;) {
+                        signal?.throwIfAborted();
+                        const { bytesRead } = await input.read(buffer, 0, buffer.length, null);
+                        if (!bytesRead) break;
+                        bytes += bytesRead; fileBytes += bytesRead;
+                        if (bytes > 200 * 1024 * 1024 || fileBytes > SNAPSHOT_FILE_LIMIT) throw new Error("Snapshot excede os limites de leitura da sandbox.");
+                        let written = 0;
+                        while (written < bytesRead) written += (await output.write(buffer, written, bytesRead - written)).bytesWritten;
+                    }
+                } finally { await input.close(); await output?.close(); }
                 await chmod(copied, info.mode & 0o111 ? 0o755 : 0o644);
             }
         }
@@ -47,7 +92,7 @@ export function dockerArguments(snapshot: string, name: string, image: string, c
 }
 
 export async function runProcess(executable: string, args: string[], options: {
-    timeoutMs: number; signal?: AbortSignal; onStop?: () => Promise<void>; env?: NodeJS.ProcessEnv;
+    timeoutMs: number; signal?: AbortSignal; onStop?: () => Promise<void>; env?: NodeJS.ProcessEnv; onOutput?: (chunk: string) => void;
 }): Promise<CommandResult> {
     options.signal?.throwIfAborted();
     return new Promise((resolveResult, reject) => {
@@ -66,6 +111,7 @@ export async function runProcess(executable: string, args: string[], options: {
         options.signal?.addEventListener("abort", onAbort, { once: true });
         if (options.signal?.aborted) stop();
         const append = (chunk: Buffer, current: string) => {
+            options.onOutput?.(chunk.toString("utf8").slice(0, OUTPUT_LIMIT));
             const next = current + chunk.toString("utf8");
             if (next.length > OUTPUT_LIMIT) truncated = true;
             return next.slice(0, OUTPUT_LIMIT);
@@ -84,8 +130,9 @@ function removeContainer(name: string): Promise<void> {
     return new Promise(done => { execFile("docker", ["rm", "--force", name], { timeout: 10_000, windowsHide: true }, () => done()); });
 }
 export async function runSandboxCommand(cwd: string, command: string, timeoutMs: number, signal?: AbortSignal): Promise<CommandResult> {
-    const image = process.env.MYAGENT_SANDBOX_IMAGE;
-    if (!image) throw new Error("Shell bloqueado: configure MYAGENT_SANDBOX_IMAGE com uma imagem Docker local de confiança. Não há fallback para shell do host.");
+    if (!dockerAvailable) throw new Error("Docker indisponível: comandos desativados. Não há fallback para shell do host.");
+    const image = sandboxImage();
+    await ensureSandboxImage(image, signal);
     const directory = await mkdtemp(join(tmpdir(), "myagent-sandbox-"));
     const name = `myagent-${randomUUID()}`;
     try {
