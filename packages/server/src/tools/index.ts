@@ -18,9 +18,29 @@ import { createDeleteFileTool } from "./delete-file";
 import { createMoveFileTool } from "./move-file";
 import { createApplyPatchTool } from "./apply-patch";
 import { createTodoWriteTool } from "./todo-write";
+import { createReadFilesTool } from "./read-files";
+import { createProjectInspectTool } from "./project-inspect";
+import { createFileOutlineTool } from "./file-outline";
+import { createEnvironmentCheckTool } from "./environment-check";
+import { createSymbolSearchTool } from "./symbol-search";
+import { createTestRunTool } from "./test-run";
+import { createTestDiscoverTool } from "./test-discover";
+import { createGitShowTool } from "./git-show";
+import { createGitBlameTool } from "./git-blame";
+import { createDiffSummaryTool } from "./diff-summary";
 
 export function createTools(cwd: string, mode: Mode, sessionId: string, security: ToolSecurityOptions = {}) {
     const readOnlyTools = {
+        read_files: createReadFilesTool(cwd),
+        project_inspect: createProjectInspectTool(cwd),
+        file_outline: createFileOutlineTool(cwd),
+        environment_check: createEnvironmentCheckTool(cwd),
+        symbol_search: createSymbolSearchTool(cwd),
+        test_run: createTestRunTool(cwd),
+        test_discover: createTestDiscoverTool(cwd),
+        git_show: createGitShowTool(cwd),
+        git_blame: createGitBlameTool(cwd),
+        diff_summary: createDiffSummaryTool(cwd),
         read_file: createReadFileTool(cwd),
         list_directory: createListDirectoryTool(cwd),
         glob: createGlobTool(cwd),
