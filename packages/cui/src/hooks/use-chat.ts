@@ -9,6 +9,7 @@ import type { Mode } from "@myagent/database"
 import { type ChatStreamEvent, type SupportedChatModelId } from "@myagent/shared"
 
 export type ClientMessagePart =
+  | { type: "tool-limit-warning"; limit: number }
   | { type: "reasoning"; text: string }
   | ClientToolCallPart
   | { type: "text"; text: string }
@@ -105,6 +106,10 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
       if (!isActiveRequest(activeStream.requestId)) return
 
       switch (event.type) {
+        case "tool-limit-warning":
+          parts.push(event)
+          emitParts(activeStream.requestId, parts)
+          break
         case "usage":
           // O evento contém o acumulado da geração, não um delta.
           activeStream.totalTokens = event.totalTokens

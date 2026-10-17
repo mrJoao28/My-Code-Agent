@@ -3,15 +3,17 @@ import { SYSTEM_ROLE_TEXT, FAILURE_HANDLING_TEXT, COMPLETION_CRITERIA_TEXT } fro
 import { buildCwdNote } from "./coding";
 import { PLAN_MODE_TEXT, BUILD_MODE_TEXT, EXECUTION_RULES_TEXT } from "./tool-rules";
 import { PLAN_WORK_METHOD_TEXT, BUILD_WORK_METHOD_TEXT, COMMON_WORK_METHOD_TEXT } from "./editing";
+import { getMaxToolCalls } from "../services/tool-service";
 
 type SystemPromptParams = {
     cwd: string | null;
     mode: Mode;
     availableTools?: string[];
     sandboxConfigured?: boolean;
+    maxToolCalls?: number;
 };
 
-export function buildSystemPrompt({ cwd, mode, availableTools = [], sandboxConfigured = false }: SystemPromptParams): string {
+export function buildSystemPrompt({ cwd, mode, availableTools = [], sandboxConfigured = false, maxToolCalls = getMaxToolCalls() }: SystemPromptParams): string {
     const tools = cwd ? availableTools : [];
     const capabilities = [
         mode === "PLAN" ? PLAN_MODE_TEXT : BUILD_MODE_TEXT,
@@ -19,7 +21,8 @@ export function buildSystemPrompt({ cwd, mode, availableTools = [], sandboxConfi
         `Ferramentas disponíveis: ${tools.length ? tools.join(", ") : "nenhuma"}.`,
         `Sandbox declarada: ${sandboxConfigured ? "Docker disponível; a imagem será verificada antes da execução" : "imagem não configurada; processos indisponíveis. Docker indisponível: não há execução de comandos; não tente shell, typecheck ou testes executáveis"}.`,
         EXECUTION_RULES_TEXT,
-        "Limites: 40 chamadas, até três chamadas idênticas e cinco minutos por geração. Resultados truncados não representam todo o conteúdo.",
+        `Limites: ${maxToolCalls} chamadas, até três chamadas idênticas e cinco minutos por geração. Resultados truncados não representam todo o conteúdo.`,
+        "Economize chamadas: prefira grep/project_inspect, leia arquivos em lote com read_files e não repita leituras. Ao se aproximar do limite, pare a investigação e resuma achados confirmados e o que ficou por verificar.",
     ].join("\n");
 
     return [

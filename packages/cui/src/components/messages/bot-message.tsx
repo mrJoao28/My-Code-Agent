@@ -58,6 +58,11 @@ export function BotMessage({
             {groupConsecutiveParts(parts).map((group)=>(
                 <box key={group.key} paddingY={1} width={"100%"}>
                     {group.parts.map((part,j)=>{
+                        if (part.type === "tool-limit-warning") {
+                            return <box key={`limit-${j}`} paddingX={3} width="100%">
+                                <text fg={colors.info}>{`Resposta parcial por limite de tool calls (${part.limit} por geração). A investigação foi encerrada para resumir os achados. Peça para continuar ou restrinja o escopo.`}</text>
+                            </box>
+                        }
                         if (part.type==="reasoning"){
                             return (
                                 <box 

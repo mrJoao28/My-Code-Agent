@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   MAX_IDENTICAL_REPEATS,
   MAX_TOOL_CALLS,
+  MAX_TOOL_CALLS_CEILING,
+  getMaxToolCalls,
   ToolCallGuard,
   ToolLoopDetectedError,
 } from "./tool-service";
@@ -38,4 +40,20 @@ describe("ToolCallGuard", () => {
       /máximo de tool calls/
     );
   });
+});
+
+test.each([
+  [undefined, 40], ["", 40], ["12", 12], ["0", 40], ["-1", 40],
+  ["abc", 40], ["1.5", 40], ["Infinity", 40], ["201", MAX_TOOL_CALLS_CEILING],
+])("tool budget configuration %s resolves to %s", (value, expected) => {
+  const previous = process.env.MYAGENT_MAX_TOOL_CALLS;
+  try {
+    if (value === undefined) delete process.env.MYAGENT_MAX_TOOL_CALLS;
+    else process.env.MYAGENT_MAX_TOOL_CALLS = value;
+    expect(getMaxToolCalls()).toBe(expected);
+    expect(new ToolCallGuard().limit).toBe(expected);
+  } finally {
+    if (previous === undefined) delete process.env.MYAGENT_MAX_TOOL_CALLS;
+    else process.env.MYAGENT_MAX_TOOL_CALLS = previous;
+  }
 });

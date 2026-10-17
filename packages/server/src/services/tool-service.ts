@@ -2,6 +2,20 @@ export { createTools } from "../tools";
 
 /** Máximo de tool calls permitidas em uma única geração. */
 export const MAX_TOOL_CALLS = 40;
+export const MAX_TOOL_CALLS_CEILING = 200;
+
+export function getMaxToolCalls(value = process.env.MYAGENT_MAX_TOOL_CALLS): number {
+    if (!value || !/^[1-9]\d*$/.test(value)) return MAX_TOOL_CALLS;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? Math.min(parsed, MAX_TOOL_CALLS_CEILING) : MAX_TOOL_CALLS;
+}
+
+export class ToolCallLimitError extends Error {
+    constructor(limit: number) {
+        super(`Limite máximo de tool calls (${limit}) atingido; finalize com os resultados disponíveis.`);
+        this.name = "ToolCallLimitError";
+    }
+}
 
 /** Máximo de vezes que a mesma chamada (tool + argumentos) pode se repetir
  * antes de considerarmos que o modelo entrou em loop. */
@@ -21,14 +35,15 @@ export class ToolLoopDetectedError extends Error {
 export class ToolCallGuard {
     private totalCalls = 0;
     private readonly callCounts = new Map<string, number>();
+    constructor(readonly limit = getMaxToolCalls()) {}
+
+    get shouldSummarize(): boolean {
+        return this.totalCalls >= Math.max(1, this.limit - 2);
+    }
 
     register(toolName: string, args: unknown): void {
+        if (this.totalCalls >= this.limit) throw new ToolCallLimitError(this.limit);
         this.totalCalls++;
-        if (this.totalCalls > MAX_TOOL_CALLS) {
-            throw new ToolLoopDetectedError(
-                `número máximo de tool calls (${MAX_TOOL_CALLS}) excedido nesta geração.`
-            );
-        }
 
         const key = `${toolName}:${safeStableStringify(args)}`;
         const count = (this.callCounts.get(key) ?? 0) + 1;

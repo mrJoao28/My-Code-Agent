@@ -5,14 +5,13 @@ import type { ChatStreamEvent, MessagePart } from "@myagent/shared";
 import { toolCallArgsSchema } from "@myagent/shared";
 import { resolveChatModel } from "../lib/models";
 import { buildSystemPrompt } from "../prompts";
-import { createTools, GLOBAL_GENERATION_TIMEOUT_MS, ToolCallGuard, ToolLoopDetectedError } from "./tool-service";
+import { createTools, GLOBAL_GENERATION_TIMEOUT_MS, ToolCallGuard, ToolCallLimitError, ToolLoopDetectedError } from "./tool-service";
 import { extractFullText, serializeParts } from "./message-format";
 import { logger } from "../lib/logger";
 import type { ModelMessage } from "ai";
 import { persistSessionContext, refreshSessionContext } from "./session-context";
 import { isDockerAvailable } from "../security/sandbox";
 
-const MAX_STEPS = 50;
 const generations = new Set<{ controller: AbortController; done: Promise<void> }>();
 
 export async function cancelAllGenerations() {
@@ -64,10 +63,15 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
     };
     const startTime = Date.now();
     const toolGuard = new ToolCallGuard();
+    let finalToolLimitStep = false;
     const tools = cwd ? createTools(cwd, mode, sessionId, {
         beforeExecute: (name, input) => {
+            if (finalToolLimitStep) throw new ToolCallLimitError(toolGuard.limit);
             try { toolGuard.register(name, input); }
-            catch (error) { abortController.abort(error); throw error; }
+            catch (error) {
+                if (!(error instanceof ToolCallLimitError)) abortController.abort(error);
+                throw error;
+            }
         },
         notify: async event => { await stream.writeSSE({ event: event.type, data: JSON.stringify(event) }); },
     }) : undefined;
@@ -135,11 +139,26 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
         abortController.signal.throwIfAborted();
         const result = (dependencies.generate ?? aiStreamText)({
             model: resolvedModel.model,
-            system: buildSystemPrompt({ cwd: cwd ?? "", mode, availableTools: Object.keys(configuredTools ?? {}), sandboxConfigured: isDockerAvailable() }),
+            system: buildSystemPrompt({ cwd: cwd ?? "", mode, availableTools: Object.keys(configuredTools ?? {}), sandboxConfigured: isDockerAvailable(), maxToolCalls: toolGuard.limit }),
             tools: configuredTools,
-            stopWhen: tools ? stepCountIs(MAX_STEPS) : undefined,
+            stopWhen: tools ? stepCountIs(toolGuard.limit + 1) : undefined,
             messages: history,
-            prepareStep: async ({ messages }) => ({ messages: await saveContext(messages, abortController.signal) }),
+            prepareStep: async ({ messages }) => {
+                abortController.signal.throwIfAborted();
+                const boundedMessages = await saveContext(messages, abortController.signal);
+                if (!toolGuard.shouldSummarize) return { messages: boundedMessages };
+                if (!finalToolLimitStep) {
+                    finalToolLimitStep = true;
+                    const warning: Extract<MessagePart, { type: "tool-limit-warning" }> = { type: "tool-limit-warning", limit: toolGuard.limit };
+                    parts.push(warning);
+                    await stream.writeSSE({ event: warning.type, data: JSON.stringify(warning) });
+                }
+                return {
+                    activeTools: [],
+                    toolChoice: "none",
+                    messages: [...boundedMessages, { role: "user", content: "Finalize agora SEM ferramentas: apresente uma resposta parcial por limite de tool calls. Resuma o que já apurou com base nos resultados disponíveis, diferencie achados de hipóteses e diga o que ficou por verificar. Não repita ações; sugira continuar ou restringir o escopo." }],
+                };
+            },
             abortSignal: abortController.signal,
             providerOptions: resolvedModel.providerOptions,
             maxRetries: resolvedModel.maxRetries,

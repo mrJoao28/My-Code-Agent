@@ -29,6 +29,12 @@ test.each(["done", "error", "interrupt", "eof"])("session token accounting handl
         await ui.waitFor(() => chat.totalTokens === 1_200);
         await act(async () => { send({ type: "usage", totalTokens: 500 }); });
         await ui.waitFor(() => chat.totalTokens === 1_500);
+        if (ending === "done") {
+            await act(async () => {
+                send({ type: "tool-limit-warning", limit: 40 });
+                send({ type: "text-delta", text: "Resumo parcial" });
+            });
+        }
         if (ending === "interrupt") {
             await act(async () => { chat.interrupt(); close(); await pending; });
         } else {
@@ -42,6 +48,11 @@ test.each(["done", "error", "interrupt", "eof"])("session token accounting handl
         expect(chat.streaming.status).toBe("idle");
         expect(chat.totalTokens).toBe(1_500);
         expect(chat.messages.at(-1)!.totalTokens).toBe(500);
+        if (ending === "done") {
+            expect(chat.messages.at(-1)).toMatchObject({ role: "assistant", content: "Resumo parcial", parts: [
+                { type: "tool-limit-warning", limit: 40 }, { type: "text", text: "Resumo parcial" },
+            ] });
+        }
     } finally {
         await act(async () => { ui.renderer.destroy(); });
     }

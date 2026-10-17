@@ -96,6 +96,27 @@ if (!process.env.MYAGENT_SESSION_RENDER_CHILD) {
         } finally { await act(async () => { ui?.renderer.destroy(); }); router.dispose(); await server.stop(true); }
     });
 
+    test("reload renders a complete partial response with its persisted limit warning", async () => {
+        const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() {
+            return Response.json({ id: "partial", title: "Análise parcial", messages: [{
+                id: "saved", role: "ASSISTANT", status: "COMPLETE", mode: "PLAN", model: "fixture",
+                content: "Achados preservados. Falta verificar concorrência.",
+                parts: [{ type: "tool-limit-warning", limit: 40 }, { type: "text", text: "Achados preservados. Falta verificar concorrência." }],
+            }] });
+        } });
+        configureApiClient({ apiUrl: server.url.toString(), token: "fixture", workspace: "C:/fixture" });
+        const router = createMemoryRouter([{ path: "/", element: <RootLayout />, errorElement: <RouteError />, children: [{ path: "sessions/:id", element: <Session /> }] }], { initialEntries: ["/sessions/partial"] });
+        let ui!: Awaited<ReturnType<typeof testRender>>;
+        try {
+            await act(async () => { ui = await testRender(<RouterProvider router={router} />, { width: 110, height: 40 }); });
+            await ui.waitForFrame(frame => frame.includes("Resposta parcial por limite de tool calls") && frame.includes("Achados preservados"));
+            expect(ui.captureCharFrame()).toContain("Peça para continuar");
+            expect(ui.captureCharFrame()).toContain("Falta verificar concorrência");
+            expect(ui.captureCharFrame()).not.toContain("interrupted");
+            expect(ui.captureCharFrame()).not.toContain("Text must be created");
+        } finally { await act(async () => { ui?.renderer.destroy(); }); router.dispose(); await server.stop(true); }
+    });
+
     test("route exceptions render terminal text and Ctrl+C exits", async () => {
         function Broken(): never { throw new Error("Falha original preservada"); }
         const router = createMemoryRouter([{ path: "/", element: <Broken />, errorElement: <RouteError /> }]);

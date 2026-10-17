@@ -1,5 +1,8 @@
 import { test, expect, mock } from "bun:test";
 import { streamAIResponse, cancelAllGenerations, type StreamDependencies, type StreamParams } from "./stream-service";
+import { streamText } from "ai";
+import { MockLanguageModelV3, convertArrayToReadableStream } from "ai/test";
+import { getSessionTodos, clearSessionTodos } from "../tools/todo-write";
 
 function setup(parts: unknown[], controller = new AbortController()) {
     const created: Record<string, unknown>[] = [], events: { event: string; data: string }[] = [];
@@ -21,6 +24,57 @@ function setup(parts: unknown[], controller = new AbortController()) {
     const params: StreamParams = { sessionId: "s", model: "fixture", mode: "PLAN", history: [], cwd: null, abortController: controller };
     return { created, events, dependencies, params, stream, create };
 }
+
+test.each([[1, 3], [3, 5], [5, 7], [40, 38]])("real SDK with budget %s and batch %s persists a normal partial answer", async (limit, batch) => {
+    const previous = process.env.MYAGENT_MAX_TOOL_CALLS;
+    process.env.MYAGENT_MAX_TOOL_CALLS = String(limit);
+    const fixture = setup([]);
+    fixture.params.cwd = process.cwd();
+    fixture.params.sessionId = `budget-${limit}`;
+    fixture.params.history = [{ role: "user", content: "Analise o projeto" }];
+    const summary = "Achado confirmado. Falta verificar os testes.";
+    const provider = new MockLanguageModelV3({ doStream: async options => {
+        const final = options.toolChoice?.type === "none";
+        if (final) {
+            expect(options.tools ?? []).toHaveLength(0);
+            expect(JSON.stringify(options.prompt)).toContain("o que ficou por verificar");
+            expect(JSON.stringify(options.prompt)).toContain("todo_write");
+        }
+        return { stream: convertArrayToReadableStream([
+            { type: "stream-start" as const, warnings: [] },
+            ...(final ? [
+                { type: "text-start" as const, id: "answer" },
+                { type: "text-delta" as const, id: "answer", delta: summary },
+                { type: "text-end" as const, id: "answer" },
+            ] : Array.from({ length: batch }, (_, i) => ({
+                type: "tool-call" as const, toolCallId: `t-${i}`, toolName: "todo_write",
+                input: JSON.stringify({ todos: [{ content: `item-${i}`, status: "pending" }] }),
+            }))),
+            { type: "finish" as const, finishReason: { unified: final ? "stop" as const : "tool-calls" as const, raw: undefined },
+                usage: { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } } },
+        ]) };
+    } });
+    fixture.dependencies.generate = streamText;
+    fixture.dependencies.resolveModel = () => ({ model: provider, provider: "ollama", modelId: "fixture" });
+    try {
+        await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+        expect(provider.doStreamCalls).toHaveLength(2);
+        expect(fixture.created).toHaveLength(1);
+        expect(fixture.created[0]).toMatchObject({ role: "ASSISTANT", status: "COMPLETE", content: summary });
+        expect(fixture.created[0]!.parts).toContainEqual({ type: "tool-limit-warning", limit });
+        const results = fixture.events.filter(event => event.event === "tool-result").map(event => JSON.parse(event.data).result as string);
+        expect(results.filter(result => !result.startsWith("Tool failed:"))).toHaveLength(Math.min(limit, batch));
+        expect(results.filter(result => result.includes("Limite máximo"))).toHaveLength(Math.max(0, batch - limit));
+        expect(getSessionTodos(fixture.params.sessionId)).toHaveLength(1);
+        expect(fixture.params.abortController.signal.aborted).toBe(false);
+        expect(fixture.events.some(event => event.event === "error")).toBe(false);
+        expect(fixture.events.at(-1)!.event).toBe("done");
+    } finally {
+        clearSessionTodos(fixture.params.sessionId);
+        if (previous === undefined) delete process.env.MYAGENT_MAX_TOOL_CALLS;
+        else process.env.MYAGENT_MAX_TOOL_CALLS = previous;
+    }
+});
 
 test("application shutdown cancels active generations and waits for cleanup", async () => {
     const fixture = setup([]);

@@ -31,6 +31,7 @@ export function contextFromMessages(rows: readonly SourceMessage[]): ModelMessag
         if (!parts.length && row.content) messages.push({ role: "assistant", content: excerpt(row.content) });
         const seen = new Set<string>();
         for (const part of parts) {
+            if (part.type === "tool-limit-warning") messages.push({ role: "assistant", content: `[Resposta parcial por limite de tool calls (${part.limit}). Há verificações pendentes; não repetir automaticamente ações com efeitos colaterais.]` });
             if (part.type === "text" && part.text) messages.push({ role: "assistant", content: excerpt(part.text) });
             if (part.type !== "tool-call" || seen.has(part.id)) continue;
             seen.add(part.id);
