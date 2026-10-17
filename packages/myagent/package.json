@@ -1,5 +1,5 @@
 {
-  "name": "my-code-agent",
+  "name": "@j2008/my-code-agent",
   "version": "0.1.0",
   "type": "module",
   "description": "Assistente de programação no terminal. Requer Bun; Docker é opcional para comandos isolados.",
@@ -32,10 +32,10 @@
   },
   "dependencies": {
     "@libsql/client": "^0.15.15",
-    "@prisma/adapter-libsql": "7.4.0",
-    "@prisma/client": "7.4.0",
     "@opentui/core": "0.4.5",
     "@opentui/react": "0.4.5",
+    "@prisma/adapter-libsql": "7.4.0",
+    "@prisma/client": "7.4.0",
     "react": "19.2.8"
   },
   "publishConfig": {
