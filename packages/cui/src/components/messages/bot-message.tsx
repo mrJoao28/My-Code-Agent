@@ -1,5 +1,5 @@
 import { Text, TextAttributes } from "@opentui/core";
-import { Mode } from "../../../../database/generated/prisma/enums";
+import { Mode } from "@myagent/database/enums";
 import type { ClientMessagePart, ClientToolCallPart } from "../../hooks/use-chat";
 import { useTheme } from "../../providers/theme";
 import { color } from "bun";

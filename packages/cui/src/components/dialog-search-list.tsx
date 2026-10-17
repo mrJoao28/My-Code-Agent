@@ -13,6 +13,7 @@ type DialogSearchListProps<T> = {
     filterFn: (item: T, query: string) => boolean;
     renderItem: (item: T, isSelected: boolean) => ReactNode;
     getKey: (item: T) => string;
+    initialSelectedKey?: string;
     placeholder?: string;
     emptyText?: string;
 };
@@ -24,10 +25,11 @@ export function DialogSearchList<T>({
     filterFn,
     renderItem,
     getKey,
+    initialSelectedKey,
     placeholder = "Search",
     emptyText = "No results",
 }: DialogSearchListProps<T>) {
-    const [selectedIndex, setSelectedIndex] = useState(0);
+    const [selectedIndex, setSelectedIndex] = useState(() => Math.max(0, items.findIndex(item => getKey(item) === initialSelectedKey)));
     const [searchValue, setSearchValue] = useState("");
     const inputRef = useRef<InputRenderable>(null);
     const scrollRef = useRef<ScrollBoxRenderable>(null);

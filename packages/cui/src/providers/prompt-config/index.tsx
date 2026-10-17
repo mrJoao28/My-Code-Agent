@@ -25,11 +25,16 @@ export function usePromptConfig(): PromptConfigContextValue {
 
 type PromptConfigProviderProps = {
   children: ReactNode;
+  initialMode?: Mode;
 };
 
-export function PromptConfigProvider({ children }: PromptConfigProviderProps) {
-  const [mode, setMode] = useState<Mode>(Mode.BUILD);
-  const [model, setModel] = useState<SupportedChatModelId>(DEFAULT_CHAT_MODEL_ID);
+export function PromptConfigProvider({ children, initialMode = Mode.BUILD }: PromptConfigProviderProps) {
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const parent = useContext(PromptConfigContext);
+  const [localModel, setLocalModel] = useState<SupportedChatModelId>(DEFAULT_CHAT_MODEL_ID);
+  // Sessões isolam o modo, mantendo a seleção de modelo compartilhada.
+  const model = parent?.model ?? localModel;
+  const setModel = parent?.setModel ?? setLocalModel;
 
   const toggleMode = useCallback(() => {
     setMode((m) => (m === Mode.BUILD ? Mode.PLAN : Mode.BUILD));

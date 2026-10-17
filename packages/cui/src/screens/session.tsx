@@ -14,7 +14,7 @@ import { useChat } from "../hooks/use-chat";
 import type { Message, ClientMessagePart } from "../hooks/use-chat";
 import { getErrorMessage } from "../lib/http-errors";
 import { useKeyboard } from "@opentui/react";
-import { usePromptConfig } from "../providers/prompt-config";
+import { PromptConfigProvider, usePromptConfig } from "../providers/prompt-config";
 import { useKeyboardLayer } from "../providers/keyboard-layer";
 
 type SessionData = InferResponseType<(typeof appClient.session)[":id"]["$get"], 200>;
@@ -117,6 +117,7 @@ function SessionChat({ session }: { session: SessionData }) {
             title={session.title}
             onSubmit={(text) => submit({ userText: text, mode, model })}
             loading={streaming.status === "streaming"}
+            generationMode={streaming.status === "streaming" ? streaming.mode : undefined}
             interruptible={streaming.status === "streaming"}
             inputDisabled={pendingApprovals.length > 0}
             totalTokens={totalTokens}
@@ -170,5 +171,8 @@ export function Session() {
     }, [id, prefetched, toast, navigate]);
 
     if (!session) return <SessionShell onSubmit={() => {}} inputDisabled />;
-    return <SessionChat key={session.id} session={session} />;
+    const lastMessage = session.messages.findLast(message => message.role === "USER" || message.role === "ASSISTANT");
+    return <PromptConfigProvider key={session.id} initialMode={lastMessage?.mode ?? "BUILD"}>
+        <SessionChat session={session} />
+    </PromptConfigProvider>;
 }

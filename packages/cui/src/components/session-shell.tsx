@@ -1,5 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import type { ReactNode } from "react";
+import type { Mode } from "@myagent/database/enums";
 import { InputBar } from "./input-bar";
 import { Spinner } from "./spinner";
 import { TokenUsageBar } from "./token-usage-bar";
@@ -13,6 +14,7 @@ type Props = {
     loading?: boolean
     interruptible?:boolean
     totalTokens?: number
+    generationMode?: Mode
 }
 
 export function SessionShell({
@@ -22,7 +24,8 @@ export function SessionShell({
     inputDisabled = false,
     loading = false,
     interruptible=false,
-    totalTokens = 0
+    totalTokens = 0,
+    generationMode,
 }: Props) {
     const {mode} = usePromptConfig()
     return (
@@ -40,7 +43,7 @@ export function SessionShell({
                 <box gap={1}>{children}</box>
             </scrollbox>
             <box flexShrink={0}>
-                <InputBar onSubmit={onSubmit} disabled={inputDisabled} />
+                <InputBar onSubmit={onSubmit} disabled={inputDisabled} generating={loading} />
             </box>
             <TokenUsageBar totalTokens={totalTokens} />
             <box
@@ -55,7 +58,8 @@ export function SessionShell({
                 <box flexDirection="row" gap={2} alignItems="center">
                     {loading ? (
                         <>
-                        <Spinner mode={mode}/>
+                        <Spinner mode={generationMode ?? mode}/>
+                        <text>Executando em {generationMode ?? mode}</text>
                         {interruptible?<text>esc to interrupt</text>:null}
                         </>
                     ):null}

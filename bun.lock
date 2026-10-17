@@ -60,15 +60,15 @@
       "name": "my-code-agent",
       "version": "0.1.0",
       "bin": {
-        "myagent": "./dist/cli.js",
+        "myagent": "dist/cli.js",
       },
       "dependencies": {
         "@libsql/client": "^0.15.15",
-        "@opentui/core": "^0.4.5",
-        "@opentui/react": "^0.4.5",
+        "@opentui/core": "0.4.5",
+        "@opentui/react": "0.4.5",
         "@prisma/adapter-libsql": "7.4.0",
         "@prisma/client": "7.4.0",
-        "react": "^19.2.6",
+        "react": "19.2.8",
       },
     },
     "packages/server": {

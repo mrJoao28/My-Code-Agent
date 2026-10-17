@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useDialog } from "../providers/dialog";
 import { DialogSearchList } from "../components/dialog-search-list";
-import{ Mode } from "../../../database/generated/prisma/enums";
+import{ Mode } from "@myagent/database/enums";
 
 const AVAILABLE_MODES:Mode[] = [Mode.BUILD,Mode.PLAN]
 
@@ -29,6 +29,7 @@ export const AgentsDialogContent = ({currentMode, onSelectMode}:AgentsDialogCont
     return (
         <DialogSearchList  
         items={AVAILABLE_MODES}
+        initialSelectedKey={currentMode}
         onSelect={handleSelect}
         filterFn={(item,query)=>getModeLabel(item).toLocaleLowerCase().includes(query.toLocaleLowerCase())}
        renderItem={(item,isSelected)=>(

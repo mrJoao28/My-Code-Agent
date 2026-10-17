@@ -8,7 +8,7 @@ const external = ["@libsql/client", "@prisma/adapter-libsql", "@prisma/client", 
 const result = await Bun.build({
     entrypoints: [resolve(directory, "src/cli.ts"), resolve(directory, "../server/src/lib/source-worker.ts"), resolve(directory, "../server/src/lib/grep-worker.ts")],
     outdir, naming: "[name].js", target: "bun", format: "esm", splitting: false,
-    external, define: { MYAGENT_BUNDLED: "true" },
+    external, define: { MYAGENT_BUNDLED: "true", "process.env.NODE_ENV": JSON.stringify("production") },
     tsconfig: resolve(directory, "../cui/tsconfig.json"),
 });
 if (!result.success) {

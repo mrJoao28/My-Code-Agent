@@ -47,7 +47,11 @@ Leituras e processos Git recebem cancelamento. Cancelar após uma mutação não
 desfaz efeitos concluídos: confira o resultado antes de tentar novamente.
 
 A tabela de contexto agora integra a baseline SQLite; a migration PostgreSQL
-`20261016010000_session_context` está arquivada. Após conferir MYAGENT_HOME:
+`20261016010000_session_context` está arquivada. No aplicativo instalado, o runner próprio aplica as migrations SQLite automaticamente
+no diretório `MYAGENT_HOME`. Não execute o Prisma CLI na instalação global.
+
+Os comandos abaixo servem somente para desenvolvimento no monorepo, após conferir
+o banco-alvo e a configuração local:
 
 ```sh
 bun run --cwd packages/database db.deploy

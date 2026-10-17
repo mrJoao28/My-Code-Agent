@@ -160,3 +160,8 @@ autorizada fora dela. Docker real não estava disponível: os dois testes de
 container foram ignorados, não aprovados. Pull e detecção de Docker foram
 validados com mocks. Não houve chamadas pagas a providers, teste local em
 Linux/macOS, publicação npm, commit ou push.
+
+## Revisão de publicação — 17/10/2026
+
+Consulte [PREPARACAO_PUBLICACAO_NPM.md](PREPARACAO_PUBLICACAO_NPM.md) para o diagnóstico,
+correções, saídas verificadas, limitações e checklist manual atualizados.

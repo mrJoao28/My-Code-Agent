@@ -1,6 +1,9 @@
-import "opentui-spinner/react"
+import { registerSpinner } from "opentui-spinner/react"
 import { useTheme } from "../providers/theme"
-import { Mode } from "../../../database/generated/prisma/enums"
+import { Mode } from "@myagent/database/enums"
+
+// O Bun elimina o import apenas por efeito colateral ao empacotar a CLI.
+registerSpinner()
 
 type Props = {
     mode?:Mode

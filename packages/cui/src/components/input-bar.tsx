@@ -22,7 +22,8 @@ import { useToast } from "../providers/toast";
 import { useDialog } from "../providers/dialog";
 import { useTheme } from "../providers/theme";
 import { usePromptConfig } from "../providers/prompt-config";
-import { Mode } from "../../../database/generated/prisma/enums";
+import { useKeyboardLayer } from "../providers/keyboard-layer";
+import { Mode } from "@myagent/database/enums";
 
 const MAX_VISIBLE_MENTIONS = 8;
 const CURRENT_DIRECTORY = process.cwd();
@@ -440,11 +441,13 @@ function FileMentionMenu({
 type Props = {
   onSubmit: (text: string) => void;
   disabled?: boolean;
+  generating?: boolean;
 };
 
 export function InputBar({
   onSubmit,
   disabled = false,
+  generating = false,
 }: Props) {
   const [inputValue, setInputValue] =
     useState("");
@@ -469,6 +472,7 @@ export function InputBar({
 
   const toast = useToast();
   const dialog = useDialog();
+  const { isTopLayer } = useKeyboardLayer();
   const { colors } = useTheme();
   const navigate = useNavigate();
 
@@ -729,7 +733,7 @@ export function InputBar({
    */
 
   useKeyboard((key) => {
-    if (disabled) {
+    if (disabled || !isTopLayer("base")) {
       return;
     }
 
@@ -952,7 +956,7 @@ export function InputBar({
           <textarea
             key="stable-input-bar-textarea"
             ref={textareaRef}
-            focused={!disabled}
+            focused={!disabled && isTopLayer("base")}
             width={"100%"}
             initialValue={inputValue}
             placeholder={
@@ -1043,14 +1047,14 @@ export function InputBar({
               </box>
             )}
 
-          <StatusBar />
+          <StatusBar generating={generating} />
         </box>
       </box>
     </box>
   );
 }
 
-export function StatusBar() {
+export function StatusBar({ generating = false }: { generating?: boolean }) {
   const { mode, model } =
     usePromptConfig();
 
@@ -1062,6 +1066,7 @@ export function StatusBar() {
       flexDirection="row"
       gap={1}
     >
+      {generating && <text>Próxima mensagem:</text>}
       <text
         fg={
           mode === Mode.PLAN
