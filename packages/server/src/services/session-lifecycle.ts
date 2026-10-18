@@ -3,20 +3,20 @@ import { checkpoints } from "../security/checkpoints";
 import { approvals } from "../security/permissions";
 import { logger } from "../lib/logger";
 
-export const SESSION_RETENTION_MS = 10 * 24 * 60 * 60 * 1_000;
+export const SESSION_RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
 export const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1_000;
 type SessionDatabase = Pick<PrismaClient, "session">;
 
-export function unexpiredSessionFilter(now = new Date()) {
-    const cutoff = new Date(now.getTime() - SESSION_RETENTION_MS);
-    return { OR: [
-        { updatedAt: { gt: cutoff } },
-        { messages: { some: { createdAt: { gt: cutoff } } } },
-    ] } satisfies Prisma.SessionWhereInput;
+export const SESSION_RETENTION_WARNING_MS = 24 * 60 * 60 * 1_000;
+export function sessionRetentionDays(value = process.env.MYAGENT_SESSION_RETENTION_DAYS): number {
+    if (value === undefined || value === "") return 90;
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) > 365_000) {
+        throw new Error("MYAGENT_SESSION_RETENTION_DAYS deve ser um inteiro entre 0 e 365000.");
+    }
+    return Number(value);
 }
+// Sessões avisadas continuam acessíveis: abri-las renova o prazo e cancela a exclusão.
 
-// Renova antes da leitura, somente dentro do prazo: uma sessão já expirada
-// não pode ser reativada entre duas execuções da limpeza.
 export async function loadSessionForUse(db: SessionDatabase, sessionId: string, now = new Date()) {
     if (!await markSessionUsed(db, sessionId, now)) return null;
     return db.session.findUnique({
@@ -27,21 +27,33 @@ export async function loadSessionForUse(db: SessionDatabase, sessionId: string, 
 
 export async function markSessionUsed(db: SessionDatabase, sessionId: string, now = new Date()) {
     const updated = await db.session.updateMany({
-        where: { id: sessionId, ...unexpiredSessionFilter(now) },
-        data: { updatedAt: now },
+        where: { id: sessionId },
+        data: { updatedAt: now, retentionWarnedAt: null },
     });
     return updated.count > 0;
 }
 
 export async function deleteInactiveSessions(db: SessionDatabase, now = new Date()) {
-    const cutoff = new Date(now.getTime() - SESSION_RETENTION_MS);
-    // Uma consulta condicional evita apagar uma sessão renovada entre uma
-    // listagem de candidatas e a exclusão. Mensagens recentes protegem também
-    // sessões antigas cujo updatedAt não tenha sido atualizado corretamente.
-    return db.session.deleteMany({ where: {
+    const days = sessionRetentionDays();
+    if (days === 0) return { count: 0 };
+    const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1_000);
+    const inactive: Prisma.SessionWhereInput = {
         updatedAt: { lte: cutoff },
-        messages: { none: { createdAt: { gt: cutoff } } },
-    } });
+        messages: { none: { OR: [{ createdAt: { gt: cutoff } }, { status: "IN_PROGRESS" }] } },
+        OR: [{ lease: null }, { lease: { expiresAt: { lte: BigInt(now.getTime()) } } }],
+    };
+    const candidates = await db.session.findMany({ where: { ...inactive, retentionWarnedAt: null }, select: { id: true, updatedAt: true }, take: 100 });
+    for (const candidate of candidates) {
+        const marked = await db.session.updateMany({ where: { ...inactive, id: candidate.id, updatedAt: candidate.updatedAt, retentionWarnedAt: null },
+            data: { retentionWarnedAt: now, updatedAt: candidate.updatedAt } });
+        if (marked.count) logger.warn({ event: "session_retention_warning", sessionId: candidate.id, deleteAfter: new Date(now.getTime() + SESSION_RETENTION_WARNING_MS).toISOString() },
+            "Sessão inativa: será apagada após 24 horas. Abra a sessão para cancelar a exclusão; MYAGENT_SESSION_RETENTION_DAYS=0 desativa a retenção.");
+    }
+    // A condição é reavaliada no DELETE: renovar/gerar mensagens durante a limpeza protege a sessão.
+    const pending = { ...inactive, retentionWarnedAt: { lte: new Date(now.getTime() - SESSION_RETENTION_WARNING_MS) } } satisfies Prisma.SessionWhereInput;
+    const count = await db.session.count({ where: pending });
+    if (count) logger.warn({ event: "sessions_before_deletion", count }, "Apagando sessões previamente avisadas há pelo menos 24 horas.");
+    return db.session.deleteMany({ where: pending });
 }
 
 type Schedule = (task: () => void, delay: number) => () => void;
@@ -76,7 +88,7 @@ export function startSessionCleanup(db: SessionDatabase, schedule: Schedule = sc
 }
 
 export async function cleanupSessionArtifacts(db: SessionDatabase) {
-    const active = async (id: string) => !!await db.session.findFirst({ where: { id, ...unexpiredSessionFilter() }, select: { id: true } });
+    const active = async (id: string) => !!await db.session.findFirst({ where: { id }, select: { id: true } });
     await checkpoints.prune(active);
     for (const id of approvals.sessions()) if (!await active(id)) approvals.forget(id);
 }

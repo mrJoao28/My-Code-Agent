@@ -36,7 +36,7 @@ export function contextFromMessages(rows: readonly SourceMessage[]): ModelMessag
         const parts = parsed.success ? parsed.data : [];
         if (row.role === "ERROR" && parts.length === 0) continue;
         if (!parts.length && !row.content) continue;
-        if (row.status === "INTERRUPTED" || row.role === "ERROR") {
+        if (row.status === "INTERRUPTED" || row.status === "IN_PROGRESS" || row.role === "ERROR") {
             messages.push({ role: "assistant", content: "[Geração anterior interrompida ou falhou. Somente resultados registrados abaixo são evidências de execução.]" });
         }
         if (!parts.length && row.content) messages.push({ role: "assistant", content: row.content });
@@ -48,7 +48,7 @@ export function contextFromMessages(rows: readonly SourceMessage[]): ModelMessag
             seen.add(part.id);
             const result = parts.find(item => item.type === "tool-result" && item.id === part.id && item.name === part.name);
             if (!result || result.type !== "tool-result") {
-                messages.push({ role: "assistant", content: `[Chamada ${part.name}, id ${part.id}: resultado indisponível. Não repetir automaticamente efeitos colaterais.]` });
+                messages.push({ role: "assistant", content: `[Chamada ${part.name}, id ${part.id}, argumentos ${JSON.stringify(part.args).slice(0, 8000)}: resultado indisponível. Não repetir automaticamente efeitos colaterais.]` });
             } else if (JSON.stringify(part.args).length > 8_000) {
                 messages.push({ role: "assistant", content: `[Resultado registrado de ${part.name}, id ${part.id}; argumentos omitidos por tamanho]\n${isReadFilePage(part.name, result.result) ? "Página de read_file omitida: use um caminho relativo menor para manter os argumentos no contexto." : result.result}` });
             } else {
@@ -211,6 +211,12 @@ export async function refreshSessionContext(db: ContextDatabase, sessionId: stri
         select: { role: true, content: true, status: true, parts: true } });
     const truncated = recent.length > MAX_SOURCE_MESSAGES;
     const source = contextFromMessages(recent.slice(0, MAX_SOURCE_MESSAGES).reverse());
+    // Muitas retomadas podem empurrar o pedido original para fora das 80 mensagens.
+    // Mantém uma âncora de usuário para o ajuste de janela não descartar todas as evidências.
+    if (source.length && !source.some(message => message.role === "user")) {
+        const original = await db.message.findFirst({ where: { sessionId, role: "USER" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { content: true } });
+        source.unshift({ role: "user", content: original?.content ?? "Retomada de histórico sem pedido original disponível. Consulte o usuário sobre pendências e não repita efeitos registrados." });
+    }
     const saved = await db.sessionContext.findUnique({ where: { sessionId }, select: { messages: true } });
     const previous = modelMessageSchema.array().safeParse(saved?.messages);
     const summaries = previous.success ? previous.data.filter(m => m.role === "assistant" && typeof m.content === "string" && m.content.startsWith(SUMMARY_PREFIX)) : [];

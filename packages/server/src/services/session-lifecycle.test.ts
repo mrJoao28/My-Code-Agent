@@ -1,24 +1,37 @@
 import { expect, mock, test } from "bun:test";
-import { deleteInactiveSessions, loadSessionForUse, startSessionCleanup, unexpiredSessionFilter,
-    SESSION_CLEANUP_INTERVAL_MS, SESSION_RETENTION_MS } from "./session-lifecycle";
+import { deleteInactiveSessions, loadSessionForUse, startSessionCleanup,
+    sessionRetentionDays, SESSION_CLEANUP_INTERVAL_MS, SESSION_RETENTION_MS } from "./session-lifecycle";
 
 const now = new Date("2026-10-15T12:00:00Z");
 const cutoff = new Date("2026-10-05T12:00:00Z");
 function database(session: object) {
-    return { session } as unknown as Parameters<typeof deleteInactiveSessions>[0];
+    return { session: { findMany: async () => [], count: async () => 0, ...session } } as unknown as Parameters<typeof deleteInactiveSessions>[0];
 }
 const flush = () => Bun.sleep(0);
 
-test("retention deletes at ten full days with one conditional query and protects recent messages", async () => {
-    const deleteMany = mock(async (_args: unknown) => ({ count: 2 }));
-    expect(await deleteInactiveSessions(database({ deleteMany }), now)).toEqual({ count: 2 });
-    expect(SESSION_RETENTION_MS).toBe(864_000_000);
-    expect(deleteMany.mock.calls).toEqual([[{ where: {
-        updatedAt: { lte: cutoff }, messages: { none: { createdAt: { gt: cutoff } } },
-    } }]]);
-    expect(unexpiredSessionFilter(now)).toEqual({ OR: [
-        { updatedAt: { gt: cutoff } }, { messages: { some: { createdAt: { gt: cutoff } } } },
-    ] });
+test("retention defaults to 90 days, validates configuration and supports never", async () => {
+    expect(SESSION_RETENTION_MS).toBe(90 * 86400000);
+    expect(sessionRetentionDays(undefined)).toBe(90);
+    expect(sessionRetentionDays("0")).toBe(0);
+    expect(sessionRetentionDays("7")).toBe(7);
+    for (const value of ["-1", "NaN", "1.5", "Infinity", "999999999999999999"]) expect(() => sessionRetentionDays(value)).toThrow();
+    const previous = process.env.MYAGENT_SESSION_RETENTION_DAYS;
+    try {
+        process.env.MYAGENT_SESSION_RETENTION_DAYS = "0";
+        const deleteMany = mock(async () => ({ count: 0 }));
+        expect(await deleteInactiveSessions(database({ deleteMany }), now)).toEqual({ count: 0 });
+        expect(deleteMany).not.toHaveBeenCalled();
+    } finally { if (previous === undefined) delete process.env.MYAGENT_SESSION_RETENTION_DAYS; else process.env.MYAGENT_SESSION_RETENTION_DAYS = previous; }
+});
+
+test("retention warns at least 24h before deletion and preserves original activity", async () => {
+    const stale = new Date(now.getTime() - SESSION_RETENTION_MS);
+    const findMany = mock(async () => [{ id: "s", updatedAt: stale }]);
+    const updateMany = mock(async (_args: unknown) => ({ count: 1 }));
+    const deleteMany = mock(async (_args: unknown) => ({ count: 0 }));
+    await deleteInactiveSessions(database({ findMany, updateMany, deleteMany }), now);
+    expect(updateMany.mock.calls[0]![0]).toMatchObject({ data: { retentionWarnedAt: now, updatedAt: stale } });
+    expect(deleteMany.mock.calls[0]![0]).toMatchObject({ where: { updatedAt: { lte: stale }, retentionWarnedAt: { lte: new Date(now.getTime() - 86400000) } } });
 });
 
 test("using a session must renew activity before reading its history", async () => {
@@ -27,7 +40,7 @@ test("using a session must renew activity before reading its history", async () 
     const findUnique = mock(async (_args: unknown) => ({ id: "s", messages: [] }));
     const result = loadSessionForUse(database({ updateMany, findUnique }), "s", now);
     expect(findUnique).not.toHaveBeenCalled();
-    expect(updateMany.mock.calls[0]).toEqual([{ where: { id: "s", ...unexpiredSessionFilter(now) }, data: { updatedAt: now } }]);
+    expect(updateMany.mock.calls[0]).toEqual([{ where: { id: "s" }, data: { updatedAt: now, retentionWarnedAt: null } }]);
     release({ count: 1 });
     expect(await result).toMatchObject({ id: "s", messages: [] });
     expect(findUnique).toHaveBeenCalledTimes(1);
@@ -60,8 +73,8 @@ test("cleanup runs at startup, repeats hourly and stops its timer", async () => 
     const deleteMany = mock(async () => ({ count: 0 }));
     const clock = scheduler();
     const stop = startSessionCleanup(database({ deleteMany }), clock.schedule);
-    expect(deleteMany).toHaveBeenCalledTimes(1);
     await flush();
+    expect(deleteMany).toHaveBeenCalledTimes(1);
     expect(clock.tasks[0]!.delay).toBe(SESSION_CLEANUP_INTERVAL_MS);
     expect(SESSION_CLEANUP_INTERVAL_MS).toBe(3_600_000);
     clock.tasks[0]!.run();

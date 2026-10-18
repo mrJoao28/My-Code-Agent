@@ -23,10 +23,7 @@ const headers = { Authorization: "Bearer " + token, "Content-Type": "application
 test("sessions list activity order, load history and return 404", async () => {
     const { session, app } = setup();
     expect((await app.request("/session", { headers })).status).toBe(200);
-    expect(session.findMany.mock.calls[0]).toMatchObject([{ where: { OR: [
-        { updatedAt: { gt: expect.any(Date) } },
-        { messages: { some: { createdAt: { gt: expect.any(Date) } } } },
-    ], userId: "local-user", workspacePath: expect.any(String) }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true } }]);
+    expect(session.findMany.mock.calls[0]).toMatchObject([{ where: { userId: "local-user", workspacePath: expect.any(String) }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true, retentionWarnedAt: true } }]);
     expect(session.updateMany).not.toHaveBeenCalled();
     const history = await app.request("/session/s", { headers });
     expect(history.status).toBe(200);

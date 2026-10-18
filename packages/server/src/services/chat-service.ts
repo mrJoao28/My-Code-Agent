@@ -1,3 +1,4 @@
+import { activeSessionGenerations, previousGenerationParts, recoverOrphanedGenerations } from "./generation-journal";
 import { checkpoints, UndoConflictError } from "../security/checkpoints";
 import { DEFAULT_CHAT_MODEL_ID } from "@myagent/shared";
 import { streamSSE } from "hono/streaming";
@@ -15,7 +16,7 @@ import type { SessionLeases } from "./session-lease";
 import { markSessionUsed } from "./session-lifecycle";
 import { contextBudget, fitContextWindow, refreshSessionContext } from "./session-context";
 
-const activeResumeSessionIds = new Set<string>();
+const activeResumeSessionIds = activeSessionGenerations;
 let sessionLeases: SessionLeases | undefined;
 export function setChatSessionLeases(leases: SessionLeases | undefined) { sessionLeases = leases; }
 
@@ -26,7 +27,18 @@ async function writeSseError(stream: Parameters<Parameters<typeof streamSSE>[1]>
   await stream.writeSSE({ event: "error", data: JSON.stringify(errorEvent) });
 }
 
-export async function handleResume(c: Context) {
+export type ChatDependencies = {
+  db: typeof db;
+  streamAIResponse: typeof streamAIResponse;
+  validateSessionWorkspace: typeof validateSessionWorkspace;
+  isSupportedChatModel: typeof isSupportedChatModel;
+  isModelConfigured: typeof isModelConfigured;
+  touchSession: typeof touchSession;
+};
+const chatDependencies: ChatDependencies = { db, streamAIResponse, validateSessionWorkspace, isSupportedChatModel, isModelConfigured, touchSession };
+
+export async function handleResume(c: Context, dependencies: ChatDependencies = chatDependencies) {
+  const { db, streamAIResponse, validateSessionWorkspace, isSupportedChatModel, isModelConfigured } = dependencies;
   const sessionId = c.req.param("sessionId");
   if (!sessionId) return c.json({ error: "Session id is required" }, 400);
   if (activeResumeSessionIds.has(sessionId)) return c.json({ error: "Session already has an active generation" }, 409);
@@ -38,16 +50,18 @@ export async function handleResume(c: Context) {
   await validateSessionWorkspace(session, c.req.header("X-Myagent-Workspace"));
   await sessionLeases?.acquire(sessionId);
   if (!await markSessionUsed(db, sessionId)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
+  await recoverOrphanedGenerations(db, sessionId);
   const resumableMessage = await db.message.findFirst({ where: { sessionId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
-  if (!resumableMessage || resumableMessage.role !== "USER") { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session has no pending user message to resume" }, 409); }
+  if (!resumableMessage || !(resumableMessage.role === "USER" || resumableMessage.role === "ASSISTANT" && resumableMessage.status === "INTERRUPTED")) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session has no pending user message to resume" }, 409); }
   if (!isSupportedChatModel(resumableMessage.model)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: `Session uses unsupported model: ${resumableMessage.model}` }, 409); }
   if (!isModelConfigured(resumableMessage.model)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "MODEL_API_KEY_REQUIRED", model: resumableMessage.model }, 428); }
+  const previousParts = resumableMessage.role === "ASSISTANT" ? await previousGenerationParts(db, resumableMessage) : [];
   const history = await refreshSessionContext(db, sessionId, c.req.raw.signal, contextBudget(findModel(resumableMessage.model)?.contextWindow).tokenLimit);
   const abortController = new AbortController();
     return streamSSE(c, async (stream) => {
       stream.onAbort(() => abortController.abort());
       try {
-        await streamAIResponse(stream, { sessionId, model: resumableMessage.model, history, mode: resumableMessage.mode, abortController, cwd: session.cwd, requestSignal: c.req.raw.signal });
+        await streamAIResponse(stream, { sessionId, generationId: resumableMessage.generationId ?? (resumableMessage.role === "ASSISTANT" ? resumableMessage.id : undefined), previousParts, model: resumableMessage.model, history, mode: resumableMessage.mode, abortController, cwd: session.cwd, requestSignal: c.req.raw.signal });
       } finally {
         activeResumeSessionIds.delete(sessionId);
       }
@@ -64,7 +78,8 @@ export async function handleResume(c: Context) {
   }
 }
 
-export async function handleSubmit(c: Context, data: SubmitBody) {
+export async function handleSubmit(c: Context, data: SubmitBody, dependencies: ChatDependencies = chatDependencies) {
+  const { db, streamAIResponse, validateSessionWorkspace, touchSession } = dependencies;
   const sessionId = c.req.param("sessionId");
   if (!sessionId) return c.json({ error: "Session id is required" }, 400);
 
@@ -90,6 +105,7 @@ export async function handleSubmit(c: Context, data: SubmitBody) {
 
     await validateSessionWorkspace(session, c.req.header("X-Myagent-Workspace"));
     await sessionLeases?.acquire(sessionId);
+    await recoverOrphanedGenerations(db, sessionId);
     if (!await markSessionUsed(db, sessionId)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
     await db.message.create({ data: { sessionId, role: "USER", status: MessageStatus.COMPLETE, model: data.model, content: data.content, mode: data.mode } });
     // BUGFIX: `Session.updatedAt` nunca era tocado, então a sessão não

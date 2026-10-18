@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react"
+import { useState, useRef, useCallback } from "react"
 import { readChatEvents } from "../lib/chat-events"
 import { sumSessionTokens } from "../lib/token-usage"
 import prettyMs from "pretty-ms"
@@ -6,13 +6,27 @@ import type { ClientResponse } from "hono/client"
 import { appClient } from "../lib/api-client"
 import { getErrorMessage } from "../lib/http-errors"
 import type { Mode } from "@myagent/database"
-import { type ChatStreamEvent, type SupportedChatModelId } from "@myagent/shared"
+import { type ChatStreamEvent, type MessagePart, type SupportedChatModelId } from "@myagent/shared"
 
 export type ClientMessagePart =
   | { type: "tool-limit-warning"; limit: number }
   | { type: "reasoning"; text: string }
   | ClientToolCallPart
   | { type: "text"; text: string }
+
+const UNKNOWN_TOOL_RESULT = "[Chamada interrompida: resultado não registrado. Inspecione o estado; não repita automaticamente efeitos colaterais.]"
+
+export function clientMessageParts(parts: MessagePart[]): ClientMessagePart[] {
+  const result: ClientMessagePart[] = []
+  for (const part of parts) {
+    if (part.type === "tool-result") {
+      const call = result.find((item): item is ClientToolCallPart => item.type === "tool-call" && item.id === part.id)
+      if (call) { call.result = part.result; call.status = "done" }
+    } else if (part.type === "tool-call") result.push({ ...part, result: UNKNOWN_TOOL_RESULT, status: "done" })
+    else result.push(part)
+  }
+  return result
+}
 
 export type ClientToolCallPart = {
   type: "tool-call"
@@ -34,6 +48,7 @@ type StreamingState =
 
 type ActiveStream = {
   requestId: string
+  messageId?: string
   controller: AbortController
   mode: Mode
   model: SupportedChatModelId
@@ -56,7 +71,10 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
   const [undoing, setUndoing] = useState(false)
   const undoingRef = useRef(false)
   const activeStreamRef = useRef<ActiveStream | null>(null)
-  const autoResumeAttemptedIdRef = useRef<string | null>(null)
+  const [pendingResume, setPendingResume] = useState(() => {
+    const last = initialMessages.at(-1)
+    return last?.role === "user" || last?.role === "assistant" && last.interrupted ? last : null
+  })
 
   const updateMessages = useCallback((updater: (prev: Message[]) => Message[]) => setMessages(updater), [])
   const isActiveRequest = useCallback((requestId: string) => activeStreamRef.current?.requestId === requestId, [])
@@ -78,15 +96,17 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
   }, [isActiveRequest])
 
   const captureInterruptedMessage = useCallback((activeStream: ActiveStream) => {
-    if (activeStream.interruptedCaptured || (activeStream.parts.length === 0 && activeStream.totalTokens === 0)) return
+    if (activeStream.interruptedCaptured || (!activeStream.messageId && activeStream.parts.length === 0 && activeStream.totalTokens === 0)) return
     activeStream.interruptedCaptured = true
-    const parts = [...activeStream.parts]
+    const parts = activeStream.parts.map(part => part.type === "tool-call" ? { ...part, result: part.result ?? UNKNOWN_TOOL_RESULT, status: "done" as const } : part)
     const content = parts.filter((part): part is Extract<ClientMessagePart, { type: "text" }> => part.type === "text").map((part) => part.text).join("")
-    updateMessages((prev) => [...prev, {
-      id: crypto.randomUUID(), role: "assistant", content,
+    const message: Message = {
+      id: activeStream.messageId ?? crypto.randomUUID(), role: "assistant", content,
       mode: activeStream.mode, model: activeStream.model, parts, interrupted: true,
       totalTokens: activeStream.totalTokens,
-    }])
+    }
+    updateMessages(prev => [...prev, message])
+    setPendingResume(message)
   }, [updateMessages])
 
   const handleStream = useCallback(async (response: ClientResponse<unknown>, activeStream: ActiveStream) => {
@@ -108,6 +128,9 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
       if (!isActiveRequest(activeStream.requestId)) return
 
       switch (event.type) {
+        case "generation-started":
+          activeStream.messageId = event.messageId
+          break
         case "tool-limit-warning":
           parts.push(event)
           emitParts(activeStream.requestId, parts)
@@ -152,16 +175,25 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
             duration: prettyMs(event.durationMs), parts: [...parts],
             totalTokens: activeStream.totalTokens,
           }])
+          activeStream.interruptedCaptured = true
           setStreaming({ status: "idle" })
           return
         }
         case "error":
+          if (event.messageId) {
+            activeStream.messageId = event.messageId
+            activeStream.parts = event.parts ? clientMessageParts(event.parts) : [...parts]
+            captureInterruptedMessage(activeStream)
+            setStreaming({ status: "idle" })
+            return
+          }
+          activeStream.interruptedCaptured = true
           updateMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "error", content: event.message, totalTokens: activeStream.totalTokens }])
           setStreaming({ status: "idle" })
           return
       }
     }
-  }, [emitParts, isActiveRequest, updateMessages])
+  }, [emitParts, isActiveRequest, updateMessages, captureInterruptedMessage])
 
   const runStream = useCallback(async ({ mode, model, request }: RunStreamParams) => {
     const controller = new AbortController()
@@ -173,12 +205,14 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
     } catch (error) {
       if (controller.signal.aborted) return
       if (isActiveRequest(activeStream.requestId)) {
-        updateMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "error", content: error instanceof Error ? error.message : String(error), totalTokens: activeStream.totalTokens }])
+        captureInterruptedMessage(activeStream)
+        updateMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "error", content: error instanceof Error ? error.message : String(error), totalTokens: activeStream.interruptedCaptured ? 0 : activeStream.totalTokens }])
       }
     } finally {
+      if (isActiveRequest(activeStream.requestId)) captureInterruptedMessage(activeStream)
       clearStream(activeStream.requestId)
     }
-  }, [clearStream, handleStream, isActiveRequest, updateMessages])
+  }, [clearStream, handleStream, isActiveRequest, updateMessages, captureInterruptedMessage])
 
   const stopActiveStream = useCallback((capturePartial: boolean) => {
     const activeStream = activeStreamRef.current
@@ -194,7 +228,8 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
   const interrupt = useCallback(() => stopActiveStream(true), [stopActiveStream])
 
   const resume = useCallback(async ({ mode, model }: Omit<SubmitParams, "userText">) => {
-    if (activeStreamRef.current) return
+    if (activeStreamRef.current || undoingRef.current) return
+    setPendingResume(null)
     await runStream({ mode, model, request: (controller) => client.chat[":sessionId"].resume.$post(
       { param: { sessionId } }, { init: { signal: controller.signal } },
     ) })
@@ -217,7 +252,7 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
     if (!userText.trim() || activeStreamRef.current || undoingRef.current) return
     if (userText.trim() === "/undo") { await undo(); return }
     const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: userText, mode, model }
-    autoResumeAttemptedIdRef.current = userMessage.id
+    setPendingResume(null)
     updateMessages((prev) => [...prev, userMessage])
     await runStream({ mode, model, request: (controller) => client.chat[":sessionId"].$post(
       { param: { sessionId }, json: { content: userText, mode, model } },
@@ -225,13 +260,11 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
     ) })
   }, [client, runStream, sessionId, updateMessages, undo])
 
-  useEffect(() => {
-    const last = messages.at(-1)
-    if (!last || last.role !== "user" || streaming.status !== "idle" || activeStreamRef.current) return
-    if (autoResumeAttemptedIdRef.current === last.id) return
-    autoResumeAttemptedIdRef.current = last.id
-    void resume({ mode: last.mode, model: last.model })
-  }, [messages, resume, streaming.status])
+  const confirmResume = useCallback(async () => {
+    if (!pendingResume) return
+    await resume({ mode: pendingResume.mode, model: pendingResume.model })
+  }, [pendingResume, resume])
+  const dismissResume = useCallback(() => setPendingResume(null), [])
 
   const decideApproval = useCallback(async (id: string, approved: boolean, remember = false) => {
     const res = await client.permissions[":sessionId"][":approvalId"].$post({ param: { sessionId, approvalId: id }, json: { approved, remember } })
@@ -240,5 +273,5 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
   }, [client, sessionId])
 
   const totalTokens = sumSessionTokens(messages) + (streaming.status === "streaming" ? streaming.totalTokens : 0)
-  return { messages, streaming, submit, resume, abort, interrupt, pendingApprovals, decideApproval, totalTokens, undo, undoing }
+  return { messages, streaming, submit, resume, abort, interrupt, pendingApprovals, decideApproval, totalTokens, undo, undoing, pendingResume, confirmResume, dismissResume }
 }

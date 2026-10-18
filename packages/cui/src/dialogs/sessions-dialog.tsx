@@ -11,6 +11,7 @@ import { DialogSearchList } from "../components/dialog-search-list"
 type Session ={
     id:string
     title:string 
+    retentionWarnedAt?: string | null
     createdAt:string
 }
 
@@ -74,7 +75,7 @@ export const SessionsDialogContent = ()=>{
         renderItem={(session,isSelected)=>(
             <>
             <text selectable={false} fg={isSelected ?"black":"white"}  >
-                {session.title}
+                {session.retentionWarnedAt ? `⚠ Exclusão após ${format(new Date(new Date(session.retentionWarnedAt).getTime() + 24 * 60 * 60 * 1000), "dd/MM HH:mm")} · ` : ""}{session.title}
             </text>
             <box flexGrow={1}/>
             <text 

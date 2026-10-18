@@ -17,7 +17,8 @@ export const messagePartSchema = z.discriminatedUnion("type", [
         type: z.literal("tool-call"),
         id: z.string(),
         name: z.string(),
-        args: toolCallArgsSchema
+        args: toolCallArgsSchema,
+        execution: z.enum(["pending", "started"]).optional(),
     }),
     z.object({
         type: z.literal("tool-result"),
@@ -40,6 +41,7 @@ export type MessageParts = z.infer<typeof messagePartsSchema>
 
 export const chatStreamEventSchema = z.discriminatedUnion("type", [
     toolLimitWarningSchema,
+    z.object({ type: z.literal("generation-started"), messageId: z.string() }),
     z.object({
         type: z.literal("usage"),
         totalTokens: z.number().int().min(0).max(2_147_483_647)
@@ -80,7 +82,9 @@ export const chatStreamEventSchema = z.discriminatedUnion("type", [
     }),
     z.object({
         type: z.literal("error"),
-        message: z.string()
+        message: z.string(),
+        messageId: z.string().optional(),
+        parts: messagePartsSchema.optional(),
     })
 ])
 

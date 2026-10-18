@@ -3,7 +3,9 @@ import type { Client } from "@libsql/client";
 import baseline from "../prisma/migrations/20261016000000_sqlite_baseline/migration.sql" with { type: "text" };
 import workspaceSessions from "../prisma/migrations/20261016010000_workspace_sessions/migration.sql" with { type: "text" };
 
-export const migrations = [{ version: 1, sql: baseline }, { version: 2, sql: workspaceSessions }];
+import durableGenerations from "../prisma/migrations/20261018000000_durable_generations/migration.sql" with { type: "text" };
+
+export const migrations = [{ version: 1, sql: baseline }, { version: 2, sql: workspaceSessions }, { version: 3, sql: durableGenerations }];
 
 export async function runMigrations(client: Client, steps = migrations): Promise<void> {
     await client.execute("BEGIN IMMEDIATE");

@@ -1,12 +1,12 @@
+import { GenerationJournal, preventEffectReplay } from "./generation-journal";
 import { streamText as aiStreamText, stepCountIs } from "ai";
 import type { PrismaClient } from "@myagent/database";
-import { MessageStatus, type Mode } from "@myagent/database/enums";
+import type { Mode } from "@myagent/database/enums";
 import type { ChatStreamEvent, MessagePart } from "@myagent/shared";
 import { toolCallArgsSchema } from "@myagent/shared";
 import { resolveChatModel } from "../lib/models";
 import { buildSystemPrompt } from "../prompts";
 import { createTools, GLOBAL_GENERATION_TIMEOUT_MS, ToolCallGuard, ToolCallLimitError, ToolLoopDetectedError } from "./tool-service";
-import { extractFullText, serializeParts } from "./message-format";
 import { logger } from "../lib/logger";
 import type { ModelMessage } from "ai";
 import { contextBudget, persistSessionContext, refreshSessionContext } from "./session-context";
@@ -33,6 +33,8 @@ export type StreamParams = {
     abortController: AbortController;
     cwd: string | null;
     requestSignal?: AbortSignal;
+    generationId?: string;
+    previousParts?: MessagePart[];
 };
 
 export type StreamDependencies = {
@@ -69,8 +71,17 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
     const toolGuard = new ToolCallGuard();
     const instructions = cwd ? new ProjectInstructions(cwd) : undefined;
     let finalToolLimitStep = false;
+    const executions = new Set<Promise<unknown>>();
+    let journal: GenerationJournal | undefined;
     const tools = cwd ? createTools(cwd, mode, sessionId, {
-        beforeExecute: (name, input) => {
+        trackExecution: async run => {
+            const execution = run(); executions.add(execution);
+            try { return await execution; } finally { executions.delete(execution); }
+        },
+        beforeExecute: async (name, input, id) => {
+            preventEffectReplay(params.previousParts ?? [], name, input);
+            if (!journal) throw new Error("Registro da geração indisponível");
+            await journal.call(id, name, toolCallArgsSchema.parse(input));
             if (finalToolLimitStep) throw new ToolCallLimitError(toolGuard.limit);
             try { toolGuard.register(name, input); }
             catch (error) {
@@ -78,9 +89,17 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
                 throw error;
             }
         },
+        beforeEffect: async (name, input, id) => { await journal!.call(id, name, toolCallArgsSchema.parse(input), true); },
+        afterExecute: async (name, id, result) => { await journal!.result(id, name, result); },
         notify: async event => { await stream.writeSSE({ event: event.type, data: JSON.stringify(event) }); },
     }, instructions) : undefined;
-    const parts: MessagePart[] = [];
+    let parts: MessagePart[] = [];
+    // O executor pode adiantar chamadas; a versão final segue a ordem observada no SSE.
+    const observedParts: MessagePart[] = [];
+    const orderObservedParts = () => {
+        const seen = new Set(observedParts);
+        parts.splice(0, parts.length, ...observedParts, ...parts.filter(part => !seen.has(part)));
+    };
     let totalTokens: number | null = null;
     let messagePersisted = false;
 
@@ -91,38 +110,23 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
     }, GLOBAL_GENERATION_TIMEOUT_MS);
 
 
-    const persistInterruptedMessage = async (extraNote?: string) => {
-        const fullText = extractFullText(parts);
-
-        if (fullText.length === 0 && parts.length === 0 && totalTokens === null) return;
-        const elapsedMs = Date.now() - startTime;
-        const validatedParts = serializeParts(parts);
-
-        await db.message.create({
-            data: {
-                sessionId,
-                role: "ASSISTANT",
-                status: MessageStatus.INTERRUPTED,
-                model,
-                content: extraNote ? `${fullText}\n\n[${extraNote}]` : fullText,
-                parts: validatedParts,
-                totalTokens,
-                mode,
-                duration: Math.round(elapsedMs / 1000)
-            }
-        });
+    const persistInterruptedMessage = async () => {
+        if (!journal) return;
+        orderObservedParts();
+        await journal.save({ status: "INTERRUPTED", totalTokens, duration: Math.round((Date.now() - startTime) / 1000) });
         messagePersisted = true;
         await touchSession(sessionId);
         await refreshAfterPersistence();
     };
 
     const persistAndSignalInterruption = async () => {
+        await Promise.allSettled([...executions]);
         await persistInterruptedMessage();
         if (!stream.aborted) {
             const reason = abortController.signal.reason;
             const message = reason instanceof ToolLoopDetectedError || reason instanceof Error && reason.message.startsWith("GENERATION_TIMEOUT:")
                 ? reason.message : "Geração interrompida.";
-            const event: ChatStreamEvent = { type: "error", message };
+            const event: ChatStreamEvent = { type: "error", message, messageId: journal?.id, parts: journal ? structuredClone(parts) : undefined };
             await stream.writeSSE({ event: "error", data: JSON.stringify(event) });
         }
     };
@@ -130,6 +134,15 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
     let detachProviderAbort: (() => void) | undefined;
     try {
         abortController.signal.throwIfAborted();
+        const initial = await db.message.create({ data: {
+            sessionId, role: "ASSISTANT", status: "IN_PROGRESS", model, mode, content: "", parts: [],
+            generationId: params.generationId,
+        } });
+        journal = new GenerationJournal(db, initial.id);
+        parts = journal.parts;
+        if (!params.generationId) await db.message.update({ where: { id: initial.id }, data: { generationId: initial.id } });
+        await touchSession(sessionId);
+        await stream.writeSSE({ event: "generation-started", data: JSON.stringify({ type: "generation-started", messageId: initial.id }) });
         const resolvedModel = (dependencies.resolveModel ?? resolveChatModel)(model);
         if (resolvedModel.abortSignal) {
             const providerSignal = resolvedModel.abortSignal;
@@ -161,7 +174,8 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
                 if (!finalToolLimitStep) {
                     finalToolLimitStep = true;
                     const warning: Extract<MessagePart, { type: "tool-limit-warning" }> = { type: "tool-limit-warning", limit: toolGuard.limit };
-                    parts.push(warning);
+                    parts.push(warning); observedParts.push(warning);
+                    await journal!.save();
                     await stream.writeSSE({ event: warning.type, data: JSON.stringify(warning) });
                 }
                 return {
@@ -177,7 +191,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
         });
 
         for await (const part of result.fullStream) {
-            if (stream.aborted) break;
+            if (stream.aborted) abortController.abort(new Error("Transporte encerrado"));
 
             if (part.type === "finish-step") {
                 const reported = part.usage.totalTokens ?? (
@@ -188,28 +202,33 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
                 if (reported !== undefined && Number.isSafeInteger(reported) && reported >= 0) {
                     totalTokens = Math.min(2_147_483_647, (totalTokens ?? 0) + reported);
                     const event: ChatStreamEvent = { type: "usage", totalTokens };
+                    await journal.save({ totalTokens });
                     await stream.writeSSE({ event: "usage", data: JSON.stringify(event) });
                 }
             }
 
             if (part.type === "reasoning-delta") {
-                const last = parts[parts.length - 1];
+                const last = observedParts.at(-1);
                 if (last && last.type === "reasoning") {
                     last.text += part.text;
                 } else {
-                    parts.push({ type: "reasoning", text: part.text });
+                    const text: MessagePart = { type: "reasoning", text: part.text };
+                    parts.push(text); observedParts.push(text);
                 }
+                await journal.save({ totalTokens });
                 const event: ChatStreamEvent = { type: "reasoning-delta", text: part.text };
                 await stream.writeSSE({ event: "reasoning-delta", data: JSON.stringify(event) });
             }
 
             if (part.type === "text-delta") {
-                const last = parts[parts.length - 1];
+                const last = observedParts.at(-1);
                 if (last && last.type === "text") {
                     last.text += part.text;
                 } else {
-                    parts.push({ type: "text", text: part.text });
+                    const text: MessagePart = { type: "text", text: part.text };
+                    parts.push(text); observedParts.push(text);
                 }
+                await journal.save({ totalTokens });
                 const event: ChatStreamEvent = { type: "text-delta", text: part.text };
                 await stream.writeSSE({ event: "text-delta", data: JSON.stringify(event) });
             }
@@ -232,12 +251,9 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
                     throw e;
                 }
 
-                parts.push({
-                    type: "tool-call",
-                    id: part.toolCallId,
-                    name: part.toolName,
-                    args
-                });
+                await journal.call(part.toolCallId, part.toolName, args);
+                const recorded = parts.find(item => item.type === "tool-call" && item.id === part.toolCallId);
+                if (recorded && !observedParts.includes(recorded)) observedParts.push(recorded);
 
                 const event: ChatStreamEvent = {
                     type: "tool-call",
@@ -257,14 +273,9 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
                     (p): p is Extract<MessagePart, { type: "tool-call" }> =>
                         p.type === "tool-call" && p.id === part.toolCallId
                 );
-                if (tcPart) {
-                    parts.push({
-                        type: "tool-result",
-                        id: part.toolCallId,
-                        name: tcPart.name,
-                        result: resultStr
-                    });
-                }
+                await journal.result(part.toolCallId, tcPart?.name ?? "unknown", resultStr);
+                const recorded = parts.find(item => item.type === "tool-result" && item.id === part.toolCallId);
+                if (recorded && !observedParts.includes(recorded)) observedParts.push(recorded);
 
                 const event: ChatStreamEvent = {
                     type: "tool-result",
@@ -287,22 +298,11 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
         }
 
         const elapsedMs = Date.now() - startTime;
-        const fullText = extractFullText(parts);
-        const validatedParts = serializeParts(parts);
 
-        const assistantMessage = await db.message.create({
-            data: {
-                sessionId,
-                role: "ASSISTANT",
-                status: MessageStatus.COMPLETE,
-                model,
-                content: fullText,
-                parts: validatedParts,
-                totalTokens,
-                mode,
-                duration: Math.round(elapsedMs / 1000)
-            }
-        });
+        await Promise.allSettled([...executions]);
+        orderObservedParts();
+        await journal.save({ status: "COMPLETE", totalTokens, duration: Math.round(elapsedMs / 1000) });
+        const assistantMessage = { id: journal.id };
         messagePersisted = true;
         await touchSession(sessionId);
         await refreshAfterPersistence();
@@ -340,22 +340,14 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
 
         logger.error({ sessionId, event: "generation_error", model, mode, err: message }, "Generation failed");
 
-        await db.message.create({
-            data: {
-                sessionId,
-                role: "ERROR",
-                status: MessageStatus.COMPLETE,
-                model,
-                content: message,
-                parts: serializeParts(parts),
-                totalTokens,
-                mode
-            }
-        });
-        await touchSession(sessionId);
-        await refreshAfterPersistence();
+        abortController.abort(e);
+        await Promise.allSettled([...executions]);
+        if (journal) {
+            parts.push({ type: "text", text: `\n[Erro: ${message}]` });
+            await persistInterruptedMessage();
+        }
 
-        const errorEvent: ChatStreamEvent = { type: "error", message };
+        const errorEvent: ChatStreamEvent = { type: "error", message, messageId: journal?.id, parts: journal ? structuredClone(parts) : undefined };
         await stream.writeSSE({ event: "error", data: JSON.stringify(errorEvent) });
     } finally {
         params.requestSignal?.removeEventListener("abort", abortRequest);

@@ -36,7 +36,11 @@ test("every generation reloads root instructions and delivers local instructions
                         { type: "text-start" as const, id: "answer" },
                         { type: "text-delta" as const, id: "answer", delta: "Arquivo analisado" },
                         { type: "text-end" as const, id: "answer" },
-                    ] : [{ type: "tool-call" as const, toolCallId: "read", toolName: "read_file", input: '{"path":"src/a.ts"}' }]),
+                    ] : [
+                        { type: "text-start" as const, id: "intro" },
+                        { type: "text-delta" as const, id: "intro", delta: "Vou ler o arquivo. " },
+                        { type: "text-end" as const, id: "intro" },
+                        { type: "tool-call" as const, toolCallId: "read", toolName: "read_file", input: '{"path":"src/a.ts"}' }]),
                     { type: "finish" as const, finishReason: { unified: final ? "stop" as const : "tool-calls" as const, raw: undefined },
                         usage: { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } } },
                 ]) };
@@ -46,6 +50,7 @@ test("every generation reloads root instructions and delivers local instructions
             await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
             expect(provider.doStreamCalls).toHaveLength(2);
             expect(fixture.created[0]?.status).toBe("COMPLETE");
+            expect((fixture.created[0]?.parts as { type: string }[]).map(part => part.type)).toEqual(["text", "tool-call", "tool-result", "text"]);
             expect(await readFile(join(cwd, "AGENTS.md"), "utf8")).toBe(`regra raiz da geração ${generation}`);
             expect((await readdir(cwd)).sort()).toEqual(["AGENTS.md", "src"]);
             expect((await readdir(join(cwd, "src"))).sort()).toEqual(["AGENTS.md", "a.ts"]);
@@ -150,7 +155,7 @@ function setup(parts: unknown[], controller = new AbortController()) {
     const create = mock(async ({ data }: { data: Record<string, unknown> }) => { created.push(data); return { id: "saved-message" }; });
     const stream = { aborted: false, writeSSE: async (event: { event: string; data: string }) => { events.push(event); } } as unknown as Parameters<typeof streamAIResponse>[0];
     const dependencies: StreamDependencies = {
-        db: { message: { create } } as unknown as StreamDependencies["db"],
+        db: { message: { create, update: async ({ data }: { data: Record<string, unknown> }) => { Object.assign(created[0]!, data); return { id: "saved-message" }; } } } as unknown as StreamDependencies["db"],
         touchSession: mock(async () => {}),
         saveContext: async messages => messages,
         refreshContext: mock(async () => {}),
@@ -165,6 +170,43 @@ function setup(parts: unknown[], controller = new AbortController()) {
     const params: StreamParams = { sessionId: "s", model: "fixture", mode: "PLAN", history: [], cwd: null, abortController: controller };
     return { created, events, dependencies, params, stream, create };
 }
+
+test("real SDK resume rejects replay before approval and execution, preserving the original file", withFixture(async ({ cwd }) => {
+    await writeFile(join(cwd, "saved.ts"), "already written");
+    const fixture = setup([]);
+    fixture.params.cwd = cwd;
+    fixture.params.mode = "BUILD";
+    fixture.params.previousParts = [
+        { type: "tool-call", id: "old", name: "write_file", args: { path: "saved.ts", content: "already written" }, execution: "started" },
+    ];
+    fixture.params.history = [{ role: "user", content: "Continue usando as evidências anteriores" }];
+    const previousRoots = process.env.MYAGENT_WORKSPACE_ROOTS;
+    process.env.MYAGENT_WORKSPACE_ROOTS = JSON.stringify([cwd]);
+    let step = 0;
+    const provider = new MockLanguageModelV3({ doStream: async options => {
+        const final = step++ > 0;
+        if (final) expect(JSON.stringify(options.prompt)).toContain("RETOMADA");
+        return { stream: convertArrayToReadableStream([
+            { type: "stream-start" as const, warnings: [] },
+            ...(final ? [
+                { type: "text-start" as const, id: "answer" },
+                { type: "text-delta" as const, id: "answer", delta: "Não repeti o efeito" },
+                { type: "text-end" as const, id: "answer" },
+            ] : [{ type: "tool-call" as const, toolCallId: "retry", toolName: "write_file", input: '{"path":"saved.ts","content":"already written"}' }]),
+            { type: "finish" as const, finishReason: { unified: final ? "stop" as const : "tool-calls" as const, raw: undefined },
+                usage: { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } } },
+        ]) };
+    } });
+    fixture.dependencies.generate = streamText;
+    fixture.dependencies.resolveModel = () => ({ model: provider, provider: "ollama", modelId: "fixture", contextWindow: 200_000 });
+    try {
+        await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+        expect(provider.doStreamCalls).toHaveLength(2);
+        expect(fixture.events.some(event => event.event === "approval-required")).toBe(false);
+        expect(fixture.created[0]).toMatchObject({ status: "COMPLETE", content: "Não repeti o efeito" });
+        expect(await readFile(join(cwd, "saved.ts"), "utf8")).toBe("already written");
+    } finally { if (previousRoots === undefined) delete process.env.MYAGENT_WORKSPACE_ROOTS; else process.env.MYAGENT_WORKSPACE_ROOTS = previousRoots; }
+}));
 
 test.each([[1, 3], [3, 5], [5, 7], [40, 38]])("real SDK with budget %s and batch %s persists a normal partial answer", async (limit, batch) => {
     const previous = process.env.MYAGENT_MAX_TOOL_CALLS;
@@ -271,7 +313,7 @@ test.each(["abort", "failure"])("reported usage is retained after %s even withou
     await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
     expect(fixture.created).toHaveLength(1);
     expect(fixture.created[0]!.totalTokens).toBe(150);
-    expect(fixture.created[0]!.role).toBe(ending === "abort" ? "ASSISTANT" : "ERROR");
+    expect(fixture.created[0]!.role).toBe("ASSISTANT");
     expect(fixture.events.some(event => event.event === "done")).toBe(false);
 });
 
@@ -305,7 +347,7 @@ test("generation streams parts, persists assistant once and signals its saved id
     expect(fixture.created[0]).toMatchObject({ role: "ASSISTANT", status: "COMPLETE", content: "hello world" });
     expect(fixture.created[0]!.parts).toEqual([
         { type: "reasoning", text: "summary" }, { type: "text", text: "hello world" },
-        { type: "tool-call", id: "t", name: "read_file", args: { path: "a" } },
+        { type: "tool-call", id: "t", name: "read_file", args: { path: "a" }, execution: "pending" },
         { type: "tool-result", id: "t", name: "read_file", result: "file content" },
     ]);
     expect(JSON.parse(fixture.events.at(-1)!.data)).toMatchObject({ type: "done", messageId: "saved-message" });
@@ -319,8 +361,8 @@ test("cancellation persists partial assistant without declaring completion", asy
 test("provider failure is persisted and streamed as an error", async () => {
     const fixture = setup([{ type: "error", error: new Error("fixture-provider-failure") }]);
     await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
-    expect(fixture.created[0]).toMatchObject({ role: "ERROR", content: "fixture-provider-failure" });
-    expect(JSON.parse(fixture.events.at(-1)!.data)).toEqual({ type: "error", message: "fixture-provider-failure" });
+    expect(fixture.created[0]).toMatchObject({ role: "ASSISTANT", status: "INTERRUPTED", content: "\n[Erro: fixture-provider-failure]" });
+    expect(JSON.parse(fixture.events.at(-1)!.data)).toMatchObject({ type: "error", message: "fixture-provider-failure", messageId: "saved-message" });
 });
 test("tool denial/failure is associated with its original call", async () => {
     const fixture = setup([
@@ -335,7 +377,7 @@ test("model-resolution failure is handled inside the generation lifecycle", asyn
     const fixture = setup([]);
     fixture.dependencies.resolveModel = () => { throw new Error("unsupported fixture model"); };
     await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
-    expect(fixture.created[0]).toMatchObject({ role: "ERROR", content: "unsupported fixture model" });
+    expect(fixture.created[0]).toMatchObject({ role: "ASSISTANT", status: "INTERRUPTED", content: "\n[Erro: unsupported fixture model]" });
 });
 
 test("request cancellation before generation prevents the model call", async () => {
@@ -356,7 +398,7 @@ test("generation limit preserves partial output and signals its cause", async ()
     })() })) as unknown as StreamDependencies["generate"];
     await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
     expect(fixture.created[0]).toMatchObject({ status: "INTERRUPTED", content: "partial" });
-    expect(JSON.parse(fixture.events.at(-1)!.data)).toEqual({ type: "error", message: "GENERATION_TIMEOUT: fixture limit" });
+    expect(JSON.parse(fixture.events.at(-1)!.data)).toMatchObject({ type: "error", message: "GENERATION_TIMEOUT: fixture limit", messageId: "saved-message" });
 });
 
 test("provider account cancellation reaches the generation and preserves partial output as interrupted", async () => {

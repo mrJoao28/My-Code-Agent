@@ -32,7 +32,7 @@ test("simulated provider → CUI diff → approval HTTP → edit → /undo → p
     const persisted: Record<string, unknown>[] = [];
     const database = {
         session: { findUnique: async () => ({ id: "e2e", cwd }), updateMany: async () => ({ count: 1 }) },
-        message: { create: async ({ data }: { data: Record<string, unknown> }) => { persisted.push(data); return { id: `message-${persisted.length}` }; } },
+        message: { update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => { Object.assign(persisted[Number(where.id.split("-").at(-1)) - 1]!, data); return { id: where.id }; }, create: async ({ data }: { data: Record<string, unknown> }) => { persisted.push(data); return { id: `message-${persisted.length}` }; } },
     } as unknown as UndoDependencies["db"];
     let step = 0;
     const provider = new MockLanguageModelV3({ doStream: async () => {

@@ -130,6 +130,10 @@ typecheck aprovado só porque `bun test` passou.
   `toolCallId` e consistência entre conteúdo em memória e mensagens recarregadas.
 - Diferencie conclusão, cancelamento, falha e interrupção por limites. Fechamento
   do transporte, isoladamente, não é prova de conclusão bem-sucedida.
+- Mensagens ASSISTANT começam em `IN_PROGRESS`; texto e pares de ferramentas são
+  gravados incrementalmente. Registre chamadas antes do executor e os resultados
+  antes de devolvê-los ao modelo. Órfãs viram `INTERRUPTED`; a CUI pede confirmação
+  antes de retomar. Um efeito iniciado sem resultado tem desfecho desconhecido.
 - Não repita automaticamente ferramentas com efeitos colaterais ao retomar.
   Preserve seus resultados e identifique a geração à qual pertencem.
 - O histórico é reconstruído de `parts`, status e pares de chamada/resultado e
@@ -142,6 +146,10 @@ typecheck aprovado só porque `bun test` passou.
   usa também leases de sessão no SQLite para exclusão entre processos, com
   heartbeat de 5 segundos e expiração de 30 segundos. Não confunda esses leases
   com recuperação dos estados em memória após reinício.
+
+- A retenção usa `MYAGENT_SESSION_RETENTION_DAYS` (90 dias; 0 desativa), aviso
+  com carência mínima de 24 horas e cancelamento ao abrir a sessão. Preserve
+  gerações em andamento e leases ativos durante a limpeza.
 
 ## Banco de dados
 

@@ -1,3 +1,4 @@
+import { ResumePanel } from "../components/resume-panel";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useLocation, useNavigate } from "react-router";
 import { z } from "zod";
@@ -10,7 +11,7 @@ import { SessionShell } from "../components/session-shell";
 import { UserrMessage, BotMessage, ErrorMessage } from "../components/messages";
 import { useToast } from "../providers/toast";
 import { appClient } from "../lib/api-client";
-import { useChat } from "../hooks/use-chat";
+import { useChat, clientMessageParts } from "../hooks/use-chat";
 import type { Message, ClientMessagePart } from "../hooks/use-chat";
 import { getErrorMessage } from "../lib/http-errors";
 import { useKeyboard } from "@opentui/react";
@@ -40,29 +41,7 @@ function mapDbMessages(dbMessages: SessionData["messages"]): Message[] {
         }
 
         const parsedParts = message.parts == null ? null : messagePartsSchema.safeParse(message.parts);
-        const parts: ClientMessagePart[] = parsedParts?.success
-            ? parsedParts.data.reduce<ClientMessagePart[]>((acc, part) => {
-                  if (part.type === "tool-result") {
-                      const toolCall = acc.find(
-                          (item): item is Extract<ClientMessagePart, { type: "tool-call" }> =>
-                              item.type === "tool-call" && item.id === part.id
-                      );
-                      if (toolCall) {
-                          toolCall.result = part.result;
-                          toolCall.status = "done";
-                      }
-                      return acc;
-                  }
-
-                  if (part.type === "tool-call") {
-                      acc.push({ ...part, status: "done" as const });
-                      return acc;
-                  }
-
-                  acc.push(part);
-                  return acc;
-              }, [])
-            : [];
+        const parts: ClientMessagePart[] = parsedParts?.success ? clientMessageParts(parsedParts.data) : [];
 
         return {
             id: message.id,
@@ -73,7 +52,7 @@ function mapDbMessages(dbMessages: SessionData["messages"]): Message[] {
             parts,
             totalTokens: message.totalTokens ?? undefined,
             ...(message.duration != null ? { duration: prettyMs(message.duration * 1000) } : {}),
-            interrupted: message.status === MessageStatus.INTERRUPTED
+            interrupted: message.status !== MessageStatus.COMPLETE
         };
     });
 }
@@ -99,7 +78,7 @@ function ChatMessage({ msg }: { msg: Message }) {
 
 function SessionChat({ session }: { session: SessionData }) {
     const [initialMessages] = useState(() => mapDbMessages(session.messages));
-    const { messages, streaming, submit, abort, interrupt, pendingApprovals, decideApproval, totalTokens, undoing } = useChat(session.id, initialMessages);
+    const { messages, streaming, submit, abort, interrupt, pendingApprovals, decideApproval, totalTokens, undoing, pendingResume, confirmResume, dismissResume } = useChat(session.id, initialMessages);
     const { isTopLayer } = useKeyboardLayer();
     const { mode, model } = usePromptConfig();
 
@@ -119,13 +98,14 @@ function SessionChat({ session }: { session: SessionData }) {
             loading={streaming.status === "streaming"}
             generationMode={streaming.status === "streaming" ? streaming.mode : undefined}
             interruptible={streaming.status === "streaming"}
-            inputDisabled={pendingApprovals.length > 0 || undoing}
+            inputDisabled={pendingApprovals.length > 0 || undoing || !!pendingResume}
             totalTokens={totalTokens}
         >
             {messages.map((msg) => <ChatMessage key={msg.id} msg={msg} />)}
             {streaming.status === "streaming" && streaming.parts.length > 0 && (
                 <BotMessage parts={streaming.parts} model={streaming.model} mode={streaming.mode} streaming />
             )}
+            {pendingResume && <ResumePanel confirm={confirmResume} dismiss={dismissResume} />}
             {pendingApprovals[0] && <ApprovalPanel key={pendingApprovals[0].approvalId} approval={pendingApprovals[0]} decide={decideApproval} interrupt={interrupt} />}
         </SessionShell>
     );

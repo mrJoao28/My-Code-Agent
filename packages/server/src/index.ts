@@ -1,3 +1,4 @@
+import { recoverOrphanedGenerations } from "./services/generation-journal";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { Prisma } from "@myagent/database";
@@ -104,7 +105,7 @@ app.onError((error, c) => {
 
 const routes = app
   .get("/runtime", c => c.json({ dockerAvailable: isDockerAvailable() }))
-  .route("/session", createSessionRoutes(db, undefined, leases))
+  .route("/session", createSessionRoutes(db, undefined, leases, db))
   .route("/chat", chat)
   .route("/models", models)
   .route("/chatgpt", createChatGPTRoutes())
@@ -123,6 +124,7 @@ export async function startServer(options: { port?: number; token: string; works
   const leases = new SessionLeases(db, () => { void cancelAllGenerations(); options.onLockLost?.(); });
   let stopCleanup: (() => void) | undefined;
   try {
+    await recoverOrphanedGenerations(db);
     if (options.sessionId) {
       const session = await db.session.findUnique({ where: { id: options.sessionId } });
       if (!session) throw new Error("Sessão não encontrada.");

@@ -55,45 +55,31 @@ test.skipIf(!connectionString)("SQLite local: context survives reload, preserves
     }
 }, 20_000);
 
-test.skipIf(!connectionString)("SQLite local: retention honors the ten-day boundary, renewal and message cascade", async () => {
-    const db = client();
-    const now = new Date();
-    const cutoff = new Date(now.getTime() - SESSION_RETENTION_MS);
-    const before = new Date(cutoff.getTime() - 1);
-    const after = new Date(cutoff.getTime() + 1);
-    const ids = Array.from({ length: 6 }, () => `retention-${randomUUID()}`);
+test("SQLite local: retention warning, renewal, disable and cascade", async () => {
+    const db = client(), now = new Date();
+    const stale = new Date(now.getTime() - SESSION_RETENTION_MS - 1);
+    const ids = [randomUUID(), randomUUID()];
+    const previous = process.env.MYAGENT_SESSION_RETENTION_DAYS;
     try {
-        for (let index = 0; index < 5; index++) {
-            await db.session.create({ data: {
-                id: ids[index]!, userId: "local-user", title: "Retention fixture", workspacePath: fixtureHome,
-                createdAt: before, updatedAt: index === 2 || index === 4 ? after : index === 1 ? cutoff : before,
-                messages: { create: { role: "USER", status: "COMPLETE", mode: "PLAN", model: DEFAULT_CHAT_MODEL_ID,
-                    content: "Retention fixture", createdAt: index === 3 ? after : before } },
-            } });
-        }
-        await db.session.create({ data: { id: ids[5]!, userId: "local-user", title: "Empty expired fixture", workspacePath: fixtureHome, createdAt: before, updatedAt: before } });
-        // Expiração é aplicada também antes do próximo ciclo de limpeza.
-        expect(await loadSessionForUse(db, ids[1]!, now)).toBeNull();
-        expect(await loadSessionForUse(db, ids[4]!, now)).not.toBeNull();
-        await deleteInactiveSessions(db, now);
-        expect(await db.session.findUnique({ where: { id: ids[0]! } })).toBeNull();
-        expect(await db.session.findUnique({ where: { id: ids[1]! } })).toBeNull();
-        expect(await db.session.findUnique({ where: { id: ids[5]! } })).toBeNull();
-        expect(await db.session.findUnique({ where: { id: ids[2]! } })).not.toBeNull();
-        expect(await db.session.findUnique({ where: { id: ids[3]! } })).not.toBeNull();
-        // A sessão renovada sobrevive mesmo quando a data antiga já expiraria.
-        await deleteInactiveSessions(db, new Date(now.getTime() + 2));
-        expect(await db.session.findUnique({ where: { id: ids[0]! } })).toBeNull();
-        expect(await db.session.findUnique({ where: { id: ids[1]! } })).toBeNull();
-        expect(await db.session.findUnique({ where: { id: ids[2]! } })).toBeNull();
-        expect(await db.session.findUnique({ where: { id: ids[3]! } })).toBeNull();
-        expect(await db.session.findUnique({ where: { id: ids[4]! } })).not.toBeNull();
-        expect(await db.message.count({ where: { sessionId: { in: ids.slice(0, 4) } } })).toBe(0);
+        delete process.env.MYAGENT_SESSION_RETENTION_DAYS;
+        for (const id of ids) await db.session.create({ data: { id, title: "retention", userId: "local-user", workspacePath: fixtureHome, updatedAt: stale,
+            messages: { create: { role: "USER", status: "COMPLETE", model: DEFAULT_CHAT_MODEL_ID, mode: "PLAN", content: "saved", createdAt: stale } } } });
+        expect((await deleteInactiveSessions(db, now)).count).toBe(0);
+        expect((await db.session.findUnique({ where: { id: ids[0]! } }))?.retentionWarnedAt).toEqual(now);
+        expect(await loadSessionForUse(db, ids[0]!, now)).not.toBeNull();
+        expect((await db.session.findUnique({ where: { id: ids[0]! } }))?.retentionWarnedAt).toBeNull();
+        process.env.MYAGENT_SESSION_RETENTION_DAYS = "0";
+        expect((await deleteInactiveSessions(db, new Date(now.getTime() + 86400000))).count).toBe(0);
+        process.env.MYAGENT_SESSION_RETENTION_DAYS = "90";
+        expect((await deleteInactiveSessions(db, new Date(now.getTime() + 86400000))).count).toBe(1);
+        expect(await db.message.count({ where: { sessionId: ids[1]! } })).toBe(0);
+        expect(await db.session.findUnique({ where: { id: ids[0]! } })).not.toBeNull();
     } finally {
-        try { await db.session.deleteMany({ where: { id: { in: ids } } }); }
-        finally { await db.$disconnect(); }
+        if (previous === undefined) delete process.env.MYAGENT_SESSION_RETENTION_DAYS; else process.env.MYAGENT_SESSION_RETENTION_DAYS = previous;
+        await db.session.deleteMany({ where: { id: { in: ids } } }); await db.$disconnect();
     }
-}, 20_000);
+}, 20000);
+
 function app(db: PrismaClient) {
     return createSessionRoutes(db);
 }
@@ -154,3 +140,22 @@ test.skipIf(!connectionString)("SQLite local: failed transaction does not leave 
         finally { await db.$disconnect(); }
     }
 }, 20_000);
+
+
+test("SQLite local: many continuations keep the original user anchor and completed tool evidence", async () => {
+    const db = client(), id = randomUUID();
+    const time = Date.now();
+    try {
+        await db.session.create({ data: { id, userId: "local-user", title: "continued", workspacePath: fixtureHome } });
+        await db.message.create({ data: { sessionId: id, role: "USER", status: "COMPLETE", model: "fixture", mode: "BUILD", content: "original request", createdAt: new Date(time) } });
+        await db.message.createMany({ data: Array.from({ length: 81 }, (_, i) => ({ sessionId: id, role: "ASSISTANT" as const, status: "INTERRUPTED" as const,
+            model: "fixture", mode: "BUILD" as const, content: "", createdAt: new Date(time + i + 1), parts: [
+                { type: "tool-call", id: String(i), name: "edit_file", args: { path: "a", old_str: String(i), new_str: String(i + 1) }, execution: "started" },
+                { type: "tool-result", id: String(i), name: "edit_file", result: `saved evidence ${i}` },
+            ] })) });
+        const history = await refreshSessionContext(db, id, undefined, 100000);
+        expect(history[0]).toEqual({ role: "user", content: "original request" });
+        expect(JSON.stringify(history)).toContain("saved evidence 80");
+        expect((await db.sessionContext.findUniqueOrThrow({ where: { sessionId: id } })).truncated).toBe(true);
+    } finally { await db.session.deleteMany({ where: { id } }); await db.$disconnect(); }
+}, 20000);

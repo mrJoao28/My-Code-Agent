@@ -21,8 +21,8 @@ test("workspace sessions resume latest, create new, isolate equal folder names a
         expect((await selectWorkspaceSession(database.db, left)).id).toBe(second.id);
         const other = await selectWorkspaceSession(database.db, right);
         expect(other.id).not.toBe(second.id);
-        expect((await listWorkspaceSessions(database.db, left)).map(s => s.id)).toEqual([second.id]);
-        expect((await listWorkspaceSessions(database.db)).length).toBe(2);
+        expect((await listWorkspaceSessions(database.db, left)).map(s => s.id)).toEqual([second.id, first.id]);
+        expect((await listWorkspaceSessions(database.db)).length).toBe(3);
         await expect(validateSessionWorkspace(second, right, dir => authorizeWorkspace(dir, [left, right]))).rejects.toThrow("bloqueado");
         expect(await validateSessionWorkspace(second, left, dir => authorizeWorkspace(dir, [left]))).toBe(second.cwd!);
     } finally { await database.close(); database = undefined!; await removeTestDatabase(home); }

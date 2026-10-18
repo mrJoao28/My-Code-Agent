@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createClient } from "@libsql/client";
-import { runMigrations } from "./migrations";
+import { runMigrations, migrations } from "./migrations";
 import { openDatabase } from "./client";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -48,4 +48,21 @@ test("in-memory opening shares the migrated connection with Prisma", async () =>
     const database = await openDatabase({ url: "file::memory:" });
     try { expect(await database.db.session.count()).toBe(0); }
     finally { await database.close(); }
+});
+
+
+test("migration upgrades existing SQLite messages without rewriting history", async () => {
+    const client = createClient({ url: "file::memory:" });
+    try {
+        await runMigrations(client, migrations.slice(0, 2));
+        await client.execute(`INSERT INTO Session (id, userId, title, updatedAt, workspacePath) VALUES ('old', 'local-user', 'old', 0, '/fixture')`);
+        await client.execute(`INSERT INTO Message (id, sessionId, role, status, model, content, mode, parts) VALUES ('old-message', 'old', 'ASSISTANT', 'COMPLETE', 'fixture', 'preserved', 'BUILD', '[{"type":"text","text":"preserved"}]')`);
+        await runMigrations(client);
+        const row = (await client.execute("SELECT status, content, parts, generationId FROM Message WHERE id='old-message'")).rows[0]!;
+        expect(row.status).toBe("COMPLETE"); expect(row.content).toBe("preserved"); expect(row.generationId).toBeNull();
+        expect(JSON.parse(String(row.parts))).toEqual([{ type: "text", text: "preserved" }]);
+        expect((await client.execute("SELECT retentionWarnedAt FROM Session")).rows[0]?.retentionWarnedAt).toBeNull();
+        await client.execute("UPDATE Message SET status='IN_PROGRESS' WHERE id='old-message'");
+        expect((await client.execute("SELECT status FROM Message")).rows[0]?.status).toBe("IN_PROGRESS");
+    } finally { client.close(); }
 });

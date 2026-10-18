@@ -32,7 +32,9 @@ O pacote usa `#!/usr/bin/env bun`; npm instala o comando, mas não instala o run
 
 Dentro de um repositório Git, o workspace é sua raiz, mesmo ao abrir uma subpasta. Fora de Git, é a pasta atual. O caminho canônico identifica o workspace; no Windows, a chave fica em minúsculas. O título exibido é o caminho absoluto. Links/junctions são recusados.
 
-Sessões da mesma pasta podem coexistir. A mesma sessão não pode ser usada por dois processos: um lock no SQLite tem heartbeat a cada 5 segundos e expira em 30 segundos se o processo parar. Sessões sem atividade por dez dias continuam sujeitas à política de retenção.
+Sessões da mesma pasta podem coexistir. A mesma sessão não pode ser usada por dois processos: um lock no SQLite tem heartbeat a cada 5 segundos e expira em 30 segundos se o processo parar. As gerações são gravadas incrementalmente no SQLite: texto, chamadas antes da execução e resultados completos. Ao reabrir, gerações órfãs aparecem como interrompidas e a CUI pergunta **“Retomar a geração pendente?”** antes de usar tokens. A retomada recupera as ferramentas registradas e bloqueia a repetição automática de efeitos já iniciados. Se o processo caiu durante um efeito, o resultado pode ser desconhecido: inspecione o estado antes de pedir outra ação.
+
+A retenção padrão é de **90 dias** de inatividade, configurável por `MYAGENT_SESSION_RETENTION_DAYS`; use `0` para nunca apagar. O aviso aparece nos logs e na lista de sessões, com pelo menos **24 horas** antes da exclusão. Abrir a sessão cancela o aviso e renova o prazo. Sessões com geração em andamento ou lease ativo ficam protegidas. A exclusão também limpa os checkpoints associados; exporte o histórico antes do prazo se precisar conservá-lo.
 
 ## Configuração e dados locais
 

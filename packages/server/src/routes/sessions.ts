@@ -1,3 +1,4 @@
+import { activeSessionGenerations, recoverOrphanedGenerations } from "../services/generation-journal";
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -7,7 +8,7 @@ import { isSupportedChatModel } from "../lib/models";
 import { authorizeWorkspace, requestWorkspace, validateSessionWorkspace } from "../security/workspaces";
 import { workspaceKey, workspaceTitle } from "../utils/workspace";
 import type { SessionLeases } from "../services/session-lease";
-import { loadSessionForUse, unexpiredSessionFilter } from "../services/session-lifecycle";
+import { loadSessionForUse } from "../services/session-lifecycle";
 import { fitContextWindow } from "../services/session-context";
 const createSessionSchema = z.object({
     title: z.string().trim().min(1).max(32768).optional(), cwd: z.string().min(1).optional(),
@@ -15,17 +16,18 @@ const createSessionSchema = z.object({
         mode: z.enum(Mode), model: z.string().refine(isSupportedChatModel, "Unsupported model"),
     }).optional(),
 });
-export function createSessionRoutes(db: Pick<PrismaClient, "session">, authorize = authorizeWorkspace, leases?: SessionLeases) {
+export function createSessionRoutes(db: Pick<PrismaClient, "session">, authorize = authorizeWorkspace, leases?: SessionLeases, recoveryDb?: Pick<PrismaClient, "message">) {
     return new Hono()
         .get("/", async c => {
             const workspace = await requestWorkspace(c.req.header("X-Myagent-Workspace"), authorize);
-            return c.json(await db.session.findMany({ where: { ...unexpiredSessionFilter(), userId: "local-user", workspacePath: await workspaceKey(workspace) }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true } }));
+            return c.json(await db.session.findMany({ where: { userId: "local-user", workspacePath: await workspaceKey(workspace) }, orderBy: { updatedAt: "desc" }, select: { id: true, title: true, createdAt: true, retentionWarnedAt: true } }));
         })
         .get("/:id", async c => {
             const candidate = await db.session.findUnique({ where: { id: c.req.param("id") } });
             if (!candidate) return c.json({ error: "Session not found" }, 404);
             await validateSessionWorkspace(candidate, c.req.header("X-Myagent-Workspace"), authorize);
             await leases?.acquire(candidate.id);
+            if (recoveryDb && !activeSessionGenerations.has(candidate.id)) await recoverOrphanedGenerations(recoveryDb, candidate.id);
             const session = await loadSessionForUse(db, c.req.param("id"));
             return session ? c.json(session) : c.json({ error: "Session not found" }, 404);
         })
