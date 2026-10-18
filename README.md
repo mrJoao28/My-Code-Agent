@@ -51,6 +51,12 @@ A imagem padrão da sandbox é `oven/bun:1.3.13`, configurável por `MYAGENT_SAN
 
 Para usar dependências já instaladas, defina `MYAGENT_SANDBOX_DEPENDENCIES=1` no ambiente. A cópia filtrada de `node_modules` e `.venv` permanece somente leitura e tem limite padrão de 512 MiB, ajustável por `MYAGENT_SANDBOX_DEPENDENCY_MIB`. Links externos são omitidos e dependências precisam ser compatíveis com Linux. `MYAGENT_SANDBOX_TMPFS_MIB` ajusta o espaço temporário (padrão 64 MiB). Veja [segurança e testes](docs/SEGURANCA_E_TESTES.md) para os limites e o tratamento de `.bin`.
 
+Durante uma aprovação, Y permite uma vez, A permite na sessão e no escopo
+exibido e N nega. Exclusão e commit sempre pedem aprovação individual. O comando
+`/undo` restaura o último passo de arquivo quando não há mudanças posteriores;
+os checkpoints ficam no diretório global, sem commits no projeto. Veja
+[aprovações e desfazer](docs/APROVACOES_E_UNDO.md).
+
 ## Desenvolvimento
 
 Use o workspace da raiz e Bun:

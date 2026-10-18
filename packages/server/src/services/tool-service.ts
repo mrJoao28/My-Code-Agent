@@ -55,6 +55,14 @@ export class ToolCallGuard {
         const readsByPath = new Map<string, Set<string>>();
         for (let i = 0; i < messages.length; i++) {
             const message = messages[i]!;
+            if (message.role === "assistant") {
+                const texts = typeof message.content === "string" ? [message.content] : message.content.flatMap(part => part.type === "text" ? [part.text] : []);
+                if (texts.some(text => text.startsWith("[UNDO] "))) {
+                    // A nota persistida invalida evidências anteriores; não altera permissões
+                    // nem o orçamento total de chamadas, que continuam no backend.
+                    available.clear(); readsByPath.clear();
+                }
+            }
             const resultMessage = messages[i + 1];
             if (message.role !== "assistant" || typeof message.content === "string" || resultMessage?.role !== "tool") continue;
             for (const call of message.content) {

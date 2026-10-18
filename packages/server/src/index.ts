@@ -11,7 +11,7 @@ import chat from "./routes/chat";
 import models from "./routes/models";
 import { createChatGPTRoutes } from "./routes/chatgpt";
 import { logger, generateRequestId } from "./lib/logger";
-import { startSessionCleanup } from "./services/session-lifecycle";
+import { startSessionCleanup, cleanupSessionArtifacts } from "./services/session-lifecycle";
 import { SessionBusyError, SessionLeases } from "./services/session-lease";
 import { setChatSessionLeases } from "./services/chat-service";
 import { setRuntimeWorkspace, validateSessionWorkspace } from "./security/workspaces";
@@ -133,7 +133,7 @@ export async function startServer(options: { port?: number; token: string; works
     const server = Bun.serve({ hostname: "127.0.0.1", port: options.port ?? 0, fetch: app.fetch, idleTimeout: 255 });
     setChatSessionLeases(leases);
     leases.start();
-    stopCleanup = startSessionCleanup(db);
+    stopCleanup = startSessionCleanup(db, undefined, () => cleanupSessionArtifacts(db));
     let stopping: Promise<void> | undefined;
     return { server, url: `http://127.0.0.1:${server.port}`, leases, dockerAvailable: docker,
       stop() {

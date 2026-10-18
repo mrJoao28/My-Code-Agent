@@ -629,6 +629,7 @@ export function InputBar({
 
         if (command.action) {
           command.action({
+            submit: onSubmit,
             exit: () =>
               renderer.destroy(),
             toast,
@@ -652,6 +653,7 @@ export function InputBar({
         }
       },
       [
+        onSubmit,
         renderer,
         toast,
         dialog,

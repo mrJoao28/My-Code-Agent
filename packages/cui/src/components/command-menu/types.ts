@@ -4,6 +4,7 @@ import type { DialogContextValue } from "../../providers/dialog";
 import type { ToastContextValue } from "../../providers/toast";
 
 export type CommandContext = {
+    submit:(text:string)=>void
     exit:()=>void
     toast:ToastContextValue
     dialog:DialogContextValue

@@ -3,7 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { Mode } from "@myagent/database";
 import { isModelConfigured, isSupportedChatModel } from "../lib/models";
-import { handleResume, handleSubmit } from "../services/chat-service";
+import { handleResume, handleSubmit, handleUndo } from "../services/chat-service";
 
 const submitSchema = z.object({
   content: z.string().trim().min(1, "Message content is required").max(100_000),
@@ -25,6 +25,7 @@ const submitValidator = zValidator("json", submitSchema, async (result, c) => {
 });
 
 const app = new Hono()
+  .post("/:sessionId/undo", async c => handleUndo(c))
   .post("/:sessionId/resume", async (c) => handleResume(c))
   .post("/:sessionId", submitValidator, async (c) => handleSubmit(c, c.req.valid("json")));
 

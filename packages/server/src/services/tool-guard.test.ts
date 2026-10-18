@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import { ToolCallGuard, MAX_IDENTICAL_REPEATS } from "./tool-service";
+import type { ModelMessage } from "ai";
 test("loop guard recognizes equivalent nested arguments regardless of key order", () => {
     const guard = new ToolCallGuard();
     guard.register("read", { path: "a", options: { limit: 1, offset: 0 } });
@@ -57,4 +58,22 @@ test("a successful edit invalidates a previous read even while its old result is
     guard.register("read_file", { path: "a" });
     guard.updateContext(history);
     expect(() => guard.register("read_file", { path: "a" })).not.toThrow();
+});
+
+test.each([false, true])("undo invalidates earlier evidence, preserves newer results and keeps the total budget: structured=%s", structured => {
+    const guard = new ToolCallGuard(3);
+    const pair = (id: string): ModelMessage[] => [
+        { role: "assistant", content: [{ type: "tool-call", toolCallId: id, toolName: "read_file", input: { path: "a" } }] },
+        { role: "tool", content: [{ type: "tool-result", toolCallId: id, toolName: "read_file", output: { type: "text", value: "content" } }] },
+    ];
+    const history = pair("old");
+    const note: ModelMessage = { role: "assistant", content: structured ? [{ type: "text", text: "[UNDO] Passo desfeito" }] : "[UNDO] Passo desfeito" };
+    guard.updateContext(history);
+    expect(() => guard.register("read_file", { path: "a" })).toThrow("já foi obtido");
+    guard.updateContext([...history, note]);
+    expect(() => guard.register("read_file", { path: "a" })).not.toThrow();
+    guard.updateContext([...history, note, ...pair("new")]);
+    expect(() => guard.register("read_file", { path: "a" })).toThrow("já foi obtido");
+    guard.updateContext([]);
+    expect(() => guard.register("read_file", { path: "other" })).toThrow("Limite máximo");
 });

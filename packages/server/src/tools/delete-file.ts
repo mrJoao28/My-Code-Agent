@@ -6,7 +6,7 @@ import { resolveSafePath, toRelative, assertSafeTree } from "../utils/path";
 export function createDeleteFileTool(cwd: string) {
     return tool({
         description:
-            "Apaga um arquivo (ou uma pasta inteira, se recursive=true) dentro do diretório de trabalho. Ação destrutiva e irreversível — use com cuidado e prefira confirmar com o usuário antes de apagar algo importante.",
+            "Apaga um arquivo (ou uma pasta inteira, se recursive=true) dentro do diretório de trabalho. Sempre exige aprovação individual; o executor BUILD salva um checkpoint antes da exclusão. /undo restaura somente se não houver mudanças posteriores.",
         inputSchema: z.object({
             path: z.string().describe("Caminho do arquivo ou pasta a apagar, relativo ao diretório de trabalho"),
             recursive: z

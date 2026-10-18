@@ -2,6 +2,7 @@ import { SessionsDialogContent, ThemeDialogContent, AgentsDialogContent, ModelDi
 import type { Command } from "./types";
 
 export const COMMANDS: Command[] = [
+  { name: "undo", description: "Desfazer o último passo sem sobrescrever mudanças posteriores", value: "/undo", action: ctx => ctx.submit("/undo") },
   {
     name: "sessions",
     description: "Browse past sessions",

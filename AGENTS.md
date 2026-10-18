@@ -107,7 +107,9 @@ typecheck aprovado só porque `bun test` passou.
 - Shell, type_check e test_run só executam na sandbox Docker configurada, sem rede e com
   snapshot filtrado somente leitura. Não reintroduza fallback de execução no host.
   Com Docker disponível, bash em BUILD, type_check e test_run dispensam aprovação.
-  Escritas no projeto, commits e ferramentas de rede continuam exigindo aprovação.
+  Escritas e rede exigem aprovação individual ou permissão explícita por sessão e
+  escopo. delete_file e git_commit sempre exigem aprovação individual. Escritas
+  BUILD recebem checkpoint global; /undo recusa conflitos e não cria commits.
   Dependências locais só são copiadas com MYAGENT_SANDBOX_DEPENDENCIES=1,
   filtradas e somente leitura; snapshots são reaproveitados por sessão.
 - A API local usa token privado, rejeita clientes de navegador e limita workspaces.

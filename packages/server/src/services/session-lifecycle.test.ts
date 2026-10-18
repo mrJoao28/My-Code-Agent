@@ -104,3 +104,14 @@ test("slow cleanup does not overlap and stopping it prevents rescheduling", asyn
     await flush();
     expect(clock.tasks).toHaveLength(0);
 });
+
+test("checkpoint cleanup follows session retention and finishes before scheduling another pass", async () => {
+    const calls: string[] = [];
+    const clock = scheduler();
+    const stop = startSessionCleanup(database({ deleteMany: async () => { calls.push("retention"); return { count: 0 }; } }), clock.schedule,
+        async () => { calls.push("checkpoints"); });
+    await flush();
+    expect(calls).toEqual(["retention", "checkpoints"]);
+    expect(clock.tasks).toHaveLength(1);
+    stop();
+});

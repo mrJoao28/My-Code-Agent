@@ -1,3 +1,6 @@
+import { approvalScope } from "./approval-scope";
+import type { CheckpointStore } from "./checkpoints";
+import type { ApprovalGrant } from "./permissions";
 import { isDockerAvailable } from "./sandbox";
 import type { ToolSet } from "ai";
 import { toolCallArgsSchema } from "@myagent/shared";
@@ -6,6 +9,7 @@ import { authorizeWorkspace } from "./workspaces";
 
 export type ToolSecurityOptions = {
     sandboxAvailable?: boolean;
+    checkpoints?: CheckpointStore;
     notify?: (event: ApprovalEvent) => Promise<void>;
     manager?: ApprovalManager;
     beforeExecute?: (name: string, input: unknown) => void;
@@ -23,13 +27,17 @@ export function secureTools<T extends ToolSet>(tools: T, cwd: string, mode: "PLA
             options.abortSignal?.throwIfAborted();
             await (security.authorize ?? authorizeWorkspace)(cwd);
             security.beforeExecute?.(name, args);
+            let grant: ApprovalGrant | undefined;
             if (decision === "approve") {
-                if (!security.notify) throw new PermissionDeniedError("A ferramenta requer aprovação explícita: " + name);
-                await (security.manager ?? approvals).request(sessionId, name, args, security.notify, options.abortSignal);
+                const scope = await approvalScope(cwd, name, args);
+                grant = await (security.manager ?? approvals).request(sessionId, name, args, security.notify, options.abortSignal, undefined, { ...scope, toolCallId: options.toolCallId });
             }
             options.abortSignal?.throwIfAborted();
             await (security.authorize ?? authorizeWorkspace)(cwd);
-            return await execute(args, options);
+            const result = mode === "BUILD" && security.checkpoints
+                ? await security.checkpoints.run(cwd, sessionId, name, args, () => Promise.resolve(execute(args, options)), options.abortSignal)
+                : await execute(args, options);
+            return grant && result && typeof result === "object" ? { ...result, approval: grant } : result;
         }};
     }
     return secured as T;

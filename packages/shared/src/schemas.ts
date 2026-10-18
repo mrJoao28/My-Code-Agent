@@ -47,6 +47,9 @@ export const chatStreamEventSchema = z.discriminatedUnion("type", [
     z.object({
         type: z.literal("approval-required"),
         approvalId: z.string(),
+        scope: z.string().optional(),
+        allowSession: z.boolean().optional(),
+        toolCallId: z.string().optional(),
         toolName: z.string(),
         args: toolCallArgsSchema,
     }),

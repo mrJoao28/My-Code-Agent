@@ -116,7 +116,7 @@ async function assertPublicHostname(hostname: string, signal: AbortSignal): Prom
     }
 }
 
-async function fetchWithSsrfGuard(initialUrl: string, signal: AbortSignal): Promise<Response> {
+async function fetchWithSsrfGuard(initialUrl: string, signal: AbortSignal, sameOriginOnly: boolean): Promise<Response> {
     let currentUrl = initialUrl;
 
     for (let redirectCount = 0; ; redirectCount++) {
@@ -125,6 +125,7 @@ async function fetchWithSsrfGuard(initialUrl: string, signal: AbortSignal): Prom
             throw new Error("Apenas URLs http/https são permitidas");
         }
 
+        if (sameOriginOnly && parsed.origin !== new URL(initialUrl).origin) throw new Error(`Redirecionamento para ${currentUrl}: faça uma nova chamada web_fetch para aprovar esse domínio.`);
         if (parsed.username || parsed.password) throw new Error("URLs com credenciais não são permitidas");
         await assertPublicHostname(parsed.hostname, signal);
 
@@ -153,7 +154,7 @@ async function fetchWithSsrfGuard(initialUrl: string, signal: AbortSignal): Prom
     }
 }
 
-export function createWebFetchTool() {
+export function createWebFetchTool(sameOriginOnly = false) {
     return tool({
         description: `Busca o conteúdo de uma URL na internet e retorna o texto (HTML é convertido para texto simples). Conteúdo maior que ${MAX_CONTENT_CHARS} caracteres é truncado. Use para ler documentação, changelogs, mensagens de erro específicas, ou qualquer página que o usuário mencionar. Endereços de rede interna/privada (localhost, IPs privados, metadata de nuvem) são bloqueados por segurança.`,
         inputSchema: z.object({
@@ -163,7 +164,7 @@ export function createWebFetchTool() {
             const deadline = toolDeadline(abortSignal, FETCH_TIMEOUT_MS);
 
             try {
-                const response = await fetchWithSsrfGuard(url, deadline.signal);
+                const response = await fetchWithSsrfGuard(url, deadline.signal, sameOriginOnly);
 
                 if (!response.ok) {
                     await response.body?.cancel();

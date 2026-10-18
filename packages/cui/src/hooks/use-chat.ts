@@ -53,6 +53,8 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [pendingApprovals, setPendingApprovals] = useState<Extract<ChatStreamEvent, { type: "approval-required" }>[]>([])
   const [streaming, setStreaming] = useState<StreamingState>({ status: "idle" })
+  const [undoing, setUndoing] = useState(false)
+  const undoingRef = useRef(false)
   const activeStreamRef = useRef<ActiveStream | null>(null)
   const autoResumeAttemptedIdRef = useRef<string | null>(null)
 
@@ -198,8 +200,22 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
     ) })
   }, [client, runStream, sessionId])
 
+  const undo = useCallback(async () => {
+    if (activeStreamRef.current || undoingRef.current) return
+    undoingRef.current = true; setUndoing(true)
+    try {
+      const res = await client.chat[":sessionId"].undo.$post({ param: { sessionId } })
+      if (!res.ok) throw new Error(await getErrorMessage(res))
+      const result = await res.json()
+      updateMessages(prev => [...prev, { id: result.messageId, role: "assistant", content: result.content, model: result.model, mode: "BUILD", parts: [{ type: "text", text: result.content }], totalTokens: 0 }])
+    } catch (error) {
+      updateMessages(prev => [...prev, { id: crypto.randomUUID(), role: "error", content: error instanceof Error ? error.message : "Não foi possível desfazer." }])
+    } finally { undoingRef.current = false; setUndoing(false) }
+  }, [client, sessionId, updateMessages])
+
   const submit = useCallback(async ({ userText, mode, model }: SubmitParams) => {
-    if (!userText.trim() || activeStreamRef.current) return
+    if (!userText.trim() || activeStreamRef.current || undoingRef.current) return
+    if (userText.trim() === "/undo") { await undo(); return }
     const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: userText, mode, model }
     autoResumeAttemptedIdRef.current = userMessage.id
     updateMessages((prev) => [...prev, userMessage])
@@ -207,7 +223,7 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
       { param: { sessionId }, json: { content: userText, mode, model } },
       { init: { signal: controller.signal } },
     ) })
-  }, [client, runStream, sessionId, updateMessages])
+  }, [client, runStream, sessionId, updateMessages, undo])
 
   useEffect(() => {
     const last = messages.at(-1)
@@ -217,12 +233,12 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
     void resume({ mode: last.mode, model: last.model })
   }, [messages, resume, streaming.status])
 
-  const decideApproval = useCallback(async (id: string, approved: boolean) => {
-    const res = await client.permissions[":sessionId"][":approvalId"].$post({ param: { sessionId, approvalId: id }, json: { approved } })
+  const decideApproval = useCallback(async (id: string, approved: boolean, remember = false) => {
+    const res = await client.permissions[":sessionId"][":approvalId"].$post({ param: { sessionId, approvalId: id }, json: { approved, remember } })
     if (res.ok || res.status === 404) setPendingApprovals(prev => prev.filter(item => item.approvalId !== id))
     if (!res.ok) throw new Error(await getErrorMessage(res))
   }, [client, sessionId])
 
   const totalTokens = sumSessionTokens(messages) + (streaming.status === "streaming" ? streaming.totalTokens : 0)
-  return { messages, streaming, submit, resume, abort, interrupt, pendingApprovals, decideApproval, totalTokens }
+  return { messages, streaming, submit, resume, abort, interrupt, pendingApprovals, decideApproval, totalTokens, undo, undoing }
 }

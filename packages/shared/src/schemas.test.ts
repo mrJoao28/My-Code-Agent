@@ -15,6 +15,8 @@ test("persisted parts retain reasoning, tool arguments/results and text", () => 
 test("streaming validates approval and terminal event fields", () => {
     expect(chatStreamEventSchema.safeParse({ type: "approval-required", approvalId: "a", toolName: "bash", args: { command: "pwd" } }).success).toBe(true);
     expect(chatStreamEventSchema.safeParse({ type: "approval-required", toolName: "bash", args: {} }).success).toBe(false);
+    const scoped = { type: "approval-required" as const, approvalId: "scoped", toolName: "edit_file", toolCallId: "call", args: { path: "a.ts" }, scope: "Caminhos: a.ts", allowSession: true };
+    expect(chatStreamEventSchema.parse(scoped)).toEqual(scoped);
     expect(chatStreamEventSchema.safeParse({ type: "done", messageId: "m", durationMs: "10" }).success).toBe(false);
 });
 test("default model exists and built-in identifiers are unique", () => {

@@ -1,4 +1,6 @@
 import type { PrismaClient, Prisma } from "@myagent/database";
+import { checkpoints } from "../security/checkpoints";
+import { approvals } from "../security/permissions";
 import { logger } from "../lib/logger";
 
 export const SESSION_RETENTION_MS = 10 * 24 * 60 * 60 * 1_000;
@@ -49,13 +51,14 @@ const scheduleTimeout: Schedule = (task, delay) => {
     return () => clearTimeout(timer);
 };
 
-export function startSessionCleanup(db: SessionDatabase, schedule: Schedule = scheduleTimeout) {
+export function startSessionCleanup(db: SessionDatabase, schedule: Schedule = scheduleTimeout, cleanupArtifacts: () => Promise<void> = async () => {}) {
     let stopped = false;
     let cancelTimer: (() => void) | undefined;
     const run = async () => {
         if (stopped) return;
         try {
             const { count } = await deleteInactiveSessions(db);
+            await cleanupArtifacts();
             if (count > 0) logger.info({ event: "inactive_sessions_deleted", count }, "Inactive sessions deleted");
         } catch {
             // Não registra a exceção do driver: ela pode incluir a conexão.
@@ -70,4 +73,10 @@ export function startSessionCleanup(db: SessionDatabase, schedule: Schedule = sc
         stopped = true;
         cancelTimer?.();
     };
+}
+
+export async function cleanupSessionArtifacts(db: SessionDatabase) {
+    const active = async (id: string) => !!await db.session.findFirst({ where: { id, ...unexpiredSessionFilter() }, select: { id: true } });
+    await checkpoints.prune(active);
+    for (const id of approvals.sessions()) if (!await active(id)) approvals.forget(id);
 }

@@ -9,8 +9,11 @@ export function withFixture(fn: (fixture: Fixture) => unknown | Promise<unknown>
         const root = await mkdtemp(join(tmpdir(), "myagent-test-"));
         const fixture = { root, cwd: join(root, "workspace"), outside: join(root, "outside") };
         await mkdir(fixture.cwd); await mkdir(fixture.outside);
+        const previousHome = process.env.MYAGENT_HOME;
+        process.env.MYAGENT_HOME = join(root, "global");
         try { await fn(fixture); }
         finally {
+            if (previousHome === undefined) delete process.env.MYAGENT_HOME; else process.env.MYAGENT_HOME = previousHome;
             if (dirname(root) !== tmpdir() || !basename(root).startsWith("myagent-test-")) throw new Error("Unsafe fixture cleanup");
             await rm(root, { recursive: true, force: true });
         }

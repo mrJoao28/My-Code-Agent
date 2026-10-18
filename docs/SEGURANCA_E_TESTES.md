@@ -57,17 +57,25 @@ servidor e cliente.
 A política fica em packages/server/src/security/tool-policy.ts e permissions.ts.
 
 - Leitura de arquivos seguros, buscas locais, Git de leitura e todos são permitidos.
-- Escrita, edição, remoção, movimentação, patch e commit exigem aprovação em BUILD.
+- Escrita, edição, remoção, movimentação, patch e commit exigem consentimento em BUILD.
+  Permissões A valem somente para a mesma ferramenta, sessão, workspace e caminhos.
+  Exclusão e commit sempre exigem aprovação individual.
 - Com sandbox disponível, bash em BUILD, type_check e test_run são permitidos sem aprovação.
 - bash continua negado em PLAN; sem sandbox, os três comandos são negados.
 - web_search e web_fetch continuam exigindo aprovação.
 - PLAN não oferece ferramentas de mutação do projeto.
 - Ferramentas desconhecidas são negadas por padrão.
 
-A CUI mostra a ferramenta e seus argumentos. Y permite aquela ação; N a nega;
-Esc interrompe a geração. Aprovações expiram em dois minutos, não são reutilizáveis,
+A CUI mostra comando, diff, caminho/prévia, movimentação ou URL completa. Y permite
+uma vez, A permite nesta sessão e no escopo exibido, N nega; Esc/Ctrl+C interrompem
+a geração. Enter não aprova. Há rolagem por setas e PgUp/PgDn. A não aparece para
+git_commit e delete_file. Aprovações expiram em dois minutos, não são reutilizáveis,
 pertencem à sessão e são descartadas em caso de cancelamento/desconexão.
-Não há opção de aprovação global silenciosa.
+Não há aprovação global silenciosa: o servidor guarda somente as permissões A
+aprovadas no ApprovalManager, por sessionId, até o processo encerrar ou a sessão
+expirar. web_fetch limita o domínio/origem (protocolo e porta incluídos); um
+redirecionamento para outra origem exige uma nova chamada/aprovação.
+Veja [aprovações e desfazer](APROVACOES_E_UNDO.md) para checkpoints e /undo.
 
 A verificação de orçamento de chamadas agora ocorre antes do executor da tool.
 Erros de ferramenta, incluindo negação, são associados à chamada no stream.

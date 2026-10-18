@@ -1,3 +1,4 @@
+import { checkpoints } from "../security/checkpoints";
 import type { Mode } from "@myagent/database";
 import { secureTools, type ToolSecurityOptions } from "../security/tool-policy";
 import { createBashTool } from "./bash";
@@ -32,6 +33,7 @@ import { ProjectInstructions, withProjectInstructions } from "../lib/project-ins
 import { isDockerAvailable } from "../security/sandbox";
 
 export function createTools(cwd: string, mode: Mode, sessionId: string, security: ToolSecurityOptions = {}, instructions = new ProjectInstructions(cwd)) {
+    security = { ...security, checkpoints: security.checkpoints ?? checkpoints };
     const processesEnabled = security.sandboxAvailable ?? isDockerAvailable();
     const readOnlyTools = {
         read_files: createReadFilesTool(cwd),
@@ -49,7 +51,7 @@ export function createTools(cwd: string, mode: Mode, sessionId: string, security
         glob: createGlobTool(cwd),
         grep: createGrepTool(cwd),
         web_search: createWebSearchTool(),
-        web_fetch: createWebFetchTool(),
+        web_fetch: createWebFetchTool(true),
         git_status: createGitStatusTool(cwd),
         git_diff: createGitDiffTool(cwd),
         git_log: createGitLogTool(cwd),

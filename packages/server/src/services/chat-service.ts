@@ -1,3 +1,5 @@
+import { checkpoints, UndoConflictError } from "../security/checkpoints";
+import { DEFAULT_CHAT_MODEL_ID } from "@myagent/shared";
 import { streamSSE } from "hono/streaming";
 import type { Context } from "hono";
 import { db } from "@myagent/database";
@@ -115,4 +117,34 @@ export async function handleSubmit(c: Context, data: SubmitBody) {
     if (e instanceof Error && e.message.startsWith("CONTEXT_MESSAGE_TOO_LARGE")) return c.json({ error: e.message }, 413);
     throw e;
   }
+}
+
+export type UndoDependencies = {
+    db: typeof db;
+    store: typeof checkpoints;
+    validate: typeof validateSessionWorkspace;
+    touch: (sessionId: string) => Promise<void>;
+};
+export async function handleUndo(c: Context, dependencies: UndoDependencies = { db, store: checkpoints, validate: validateSessionWorkspace, touch: touchSession }) {
+    const { db, store, validate, touch } = dependencies;
+    const sessionId = c.req.param("sessionId");
+    if (!sessionId) return c.json({ error: "Sessão necessária." }, 400);
+    if (activeResumeSessionIds.has(sessionId)) return c.json({ error: "Interrompa a geração antes de usar /undo." }, 409);
+    activeResumeSessionIds.add(sessionId);
+    try {
+        const session = await db.session.findUnique({ where: { id: sessionId } });
+        if (!session) return c.json({ error: "Sessão não encontrada." }, 404);
+        await validate(session, c.req.header("X-Myagent-Workspace"));
+        await sessionLeases?.acquire(sessionId);
+        if (!await markSessionUsed(db, sessionId)) return c.json({ error: "Sessão expirada." }, 404);
+        if (!session.cwd) return c.json({ error: "Sessão sem workspace." }, 409);
+        const result = await store.undo(session.cwd, sessionId);
+        const content = `[UNDO] ${result.message} O estado anterior das ferramentas foi desfeito; releia os arquivos antes de continuar.`;
+        const model = DEFAULT_CHAT_MODEL_ID;
+        const saved = await db.message.create({ data: { sessionId, role: "ASSISTANT", status: "COMPLETE", model, mode: "BUILD", content, parts: [{ type: "text", text: content }], totalTokens: 0 } });
+        await touch(sessionId);
+        return c.json({ ...result, messageId: saved.id, content, model });
+    } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : "Não foi possível desfazer." }, error instanceof UndoConflictError ? 409 : 400);
+    } finally { activeResumeSessionIds.delete(sessionId); }
 }

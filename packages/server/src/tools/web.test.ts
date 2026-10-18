@@ -1,5 +1,13 @@
 import { test, expect, spyOn } from "bun:test";
 import { createWebFetchTool } from "./web-fetch";
+
+test("session domain permission cannot follow a redirect to another origin", async () => {
+    const fetch = stubFetch(async () => new Response(null, { status: 302, headers: { Location: "https://93.184.216.35/other" } }));
+    try {
+        await expect(execute(createWebFetchTool(true), { url: "https://93.184.216.34/start" })).rejects.toThrow("aprovar esse domínio");
+        expect(fetch).toHaveBeenCalledTimes(1);
+    } finally { fetch.mockRestore(); }
+});
 import { createWebSearchTool } from "./web-search";
 import { execute } from "../test-support";
 function stubFetch(fn: () => Promise<Response>) {

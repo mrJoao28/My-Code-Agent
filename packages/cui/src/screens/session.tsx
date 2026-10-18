@@ -99,7 +99,7 @@ function ChatMessage({ msg }: { msg: Message }) {
 
 function SessionChat({ session }: { session: SessionData }) {
     const [initialMessages] = useState(() => mapDbMessages(session.messages));
-    const { messages, streaming, submit, abort, interrupt, pendingApprovals, decideApproval, totalTokens } = useChat(session.id, initialMessages);
+    const { messages, streaming, submit, abort, interrupt, pendingApprovals, decideApproval, totalTokens, undoing } = useChat(session.id, initialMessages);
     const { isTopLayer } = useKeyboardLayer();
     const { mode, model } = usePromptConfig();
 
@@ -119,14 +119,14 @@ function SessionChat({ session }: { session: SessionData }) {
             loading={streaming.status === "streaming"}
             generationMode={streaming.status === "streaming" ? streaming.mode : undefined}
             interruptible={streaming.status === "streaming"}
-            inputDisabled={pendingApprovals.length > 0}
+            inputDisabled={pendingApprovals.length > 0 || undoing}
             totalTokens={totalTokens}
         >
             {messages.map((msg) => <ChatMessage key={msg.id} msg={msg} />)}
             {streaming.status === "streaming" && streaming.parts.length > 0 && (
                 <BotMessage parts={streaming.parts} model={streaming.model} mode={streaming.mode} streaming />
             )}
-            {pendingApprovals[0] && <ApprovalPanel key={pendingApprovals[0].approvalId} approval={pendingApprovals[0]} decide={decideApproval} />}
+            {pendingApprovals[0] && <ApprovalPanel key={pendingApprovals[0].approvalId} approval={pendingApprovals[0]} decide={decideApproval} interrupt={interrupt} />}
         </SessionShell>
     );
 }
