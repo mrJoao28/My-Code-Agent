@@ -28,9 +28,10 @@ import { createTestDiscoverTool } from "./test-discover";
 import { createGitShowTool } from "./git-show";
 import { createGitBlameTool } from "./git-blame";
 import { createDiffSummaryTool } from "./diff-summary";
+import { ProjectInstructions, withProjectInstructions } from "../lib/project-instructions";
 import { isDockerAvailable } from "../security/sandbox";
 
-export function createTools(cwd: string, mode: Mode, sessionId: string, security: ToolSecurityOptions = {}) {
+export function createTools(cwd: string, mode: Mode, sessionId: string, security: ToolSecurityOptions = {}, instructions = new ProjectInstructions(cwd)) {
     const processesEnabled = security.sandboxAvailable ?? isDockerAvailable();
     const readOnlyTools = {
         read_files: createReadFilesTool(cwd),
@@ -57,10 +58,10 @@ export function createTools(cwd: string, mode: Mode, sessionId: string, security
     };
 
     if (mode === "PLAN") {
-        return secureTools(readOnlyTools, cwd, mode, sessionId, security);
+        return secureTools(withProjectInstructions(readOnlyTools, instructions), cwd, mode, sessionId, security);
     }
 
-    return secureTools({
+    return secureTools(withProjectInstructions({
         ...readOnlyTools,
         write_file: createWriteFileTool(cwd),
         edit_file: createEditFileTool(cwd),
@@ -69,5 +70,5 @@ export function createTools(cwd: string, mode: Mode, sessionId: string, security
         apply_patch: createApplyPatchTool(cwd),
         ...(processesEnabled && { bash: createBashTool(cwd) }),
         git_commit: createGitCommitTool(cwd)
-    }, cwd, mode, sessionId, security);
+    }, instructions), cwd, mode, sessionId, security);
 }

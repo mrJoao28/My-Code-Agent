@@ -11,6 +11,8 @@ import { logger } from "../lib/logger";
 import type { ModelMessage } from "ai";
 import { contextBudget, persistSessionContext, refreshSessionContext } from "./session-context";
 import { findModel } from "../lib/model-registry";
+import { ProjectInstructions } from "../lib/project-instructions";
+import { authorizeWorkspace } from "../security/workspaces";
 import { isDockerAvailable } from "../security/sandbox";
 
 const generations = new Set<{ controller: AbortController; done: Promise<void> }>();
@@ -65,6 +67,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
     };
     const startTime = Date.now();
     const toolGuard = new ToolCallGuard();
+    const instructions = cwd ? new ProjectInstructions(cwd) : undefined;
     let finalToolLimitStep = false;
     const tools = cwd ? createTools(cwd, mode, sessionId, {
         beforeExecute: (name, input) => {
@@ -76,7 +79,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
             }
         },
         notify: async event => { await stream.writeSSE({ event: event.type, data: JSON.stringify(event) }); },
-    }) : undefined;
+    }, instructions) : undefined;
     const parts: MessagePart[] = [];
     let totalTokens: number | null = null;
     let messagePersisted = false;
@@ -139,7 +142,9 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
             ? Object.fromEntries(Object.entries(tools).map(([name, definition]) => [name, { ...definition, providerOptions: resolvedModel.toolOptions }]))
             : tools;
         abortController.signal.throwIfAborted();
-        const system = buildSystemPrompt({ cwd: cwd ?? "", mode, availableTools: Object.keys(configuredTools ?? {}), sandboxConfigured: isDockerAvailable(), maxToolCalls: toolGuard.limit });
+        if (cwd) await authorizeWorkspace(cwd);
+        const projectInstructions = await instructions?.root(abortController.signal);
+        const system = buildSystemPrompt({ cwd: cwd ?? "", mode, availableTools: Object.keys(configuredTools ?? {}), sandboxConfigured: isDockerAvailable(), maxToolCalls: toolGuard.limit, projectInstructions });
         budget = contextBudget(resolvedModel.contextWindow ?? findModel(model)?.contextWindow, system, configuredTools);
         const result = (dependencies.generate ?? aiStreamText)({
             model: resolvedModel.model,

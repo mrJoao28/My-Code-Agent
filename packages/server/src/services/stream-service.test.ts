@@ -3,10 +3,58 @@ import { streamAIResponse, cancelAllGenerations, type StreamDependencies, type S
 import { streamText } from "ai";
 import { MockLanguageModelV3, convertArrayToReadableStream } from "ai/test";
 import { getSessionTodos, clearSessionTodos } from "../tools/todo-write";
-import { writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withFixture } from "../test-support";
 import { contextBudget, fitContextWindow, persistSessionContext } from "./session-context";
+
+test("every generation reloads root instructions and delivers local instructions through real SDK tool results", withFixture(async ({ cwd }) => {
+    await mkdir(join(cwd, "src"));
+    await writeFile(join(cwd, "src", "AGENTS.md"), "regra local exclusiva: fixtures tipadas");
+    await writeFile(join(cwd, "src", "a.ts"), "export const a = 1;");
+    const previousRoots = process.env.MYAGENT_WORKSPACE_ROOTS;
+    process.env.MYAGENT_WORKSPACE_ROOTS = JSON.stringify([cwd]);
+    try {
+        for (const generation of [0, 1]) {
+            await writeFile(join(cwd, "AGENTS.md"), `regra raiz da geração ${generation}`);
+            const fixture = setup([]);
+            fixture.params.cwd = cwd;
+            fixture.params.history = [{ role: "user", content: "Leia src/a.ts sem criar documentação" }];
+            let step = 0;
+            const provider = new MockLanguageModelV3({ doStream: async options => {
+                const prompt = JSON.stringify(options.prompt);
+                expect(prompt).toContain(`regra raiz da geração ${generation}`);
+                expect(prompt).not.toContain(`regra raiz da geração ${1 - generation}`);
+                const final = step++ > 0;
+                if (final) {
+                    expect(prompt).toContain("regra local exclusiva: fixtures tipadas");
+                    expect(prompt).toContain("projectInstructions");
+                } else expect(prompt).not.toContain("regra local exclusiva: fixtures tipadas");
+                return { stream: convertArrayToReadableStream([
+                    { type: "stream-start" as const, warnings: [] },
+                    ...(final ? [
+                        { type: "text-start" as const, id: "answer" },
+                        { type: "text-delta" as const, id: "answer", delta: "Arquivo analisado" },
+                        { type: "text-end" as const, id: "answer" },
+                    ] : [{ type: "tool-call" as const, toolCallId: "read", toolName: "read_file", input: '{"path":"src/a.ts"}' }]),
+                    { type: "finish" as const, finishReason: { unified: final ? "stop" as const : "tool-calls" as const, raw: undefined },
+                        usage: { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } } },
+                ]) };
+            } });
+            fixture.dependencies.resolveModel = () => ({ model: provider, provider: "ollama", modelId: "fixture", contextWindow: 200_000 });
+            fixture.dependencies.generate = streamText;
+            await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+            expect(provider.doStreamCalls).toHaveLength(2);
+            expect(fixture.created[0]?.status).toBe("COMPLETE");
+            expect(await readFile(join(cwd, "AGENTS.md"), "utf8")).toBe(`regra raiz da geração ${generation}`);
+            expect((await readdir(cwd)).sort()).toEqual(["AGENTS.md", "src"]);
+            expect((await readdir(join(cwd, "src"))).sort()).toEqual(["AGENTS.md", "a.ts"]);
+        }
+    } finally {
+        if (previousRoots === undefined) delete process.env.MYAGENT_WORKSPACE_ROOTS;
+        else process.env.MYAGENT_WORKSPACE_ROOTS = previousRoots;
+    }
+}));
 
 test("real SDK completes 30 successive reads with every middle line visible and full results persisted", withFixture(async ({ cwd }) => {
     const fixture = setup([]);
