@@ -1,0 +1,2 @@
+# Novos checkouts usam LF para texto; binários não são convertidos.
+* text=auto eol=lf

@@ -66,5 +66,3 @@ export function createEditFileTool(cwd: string) {
         }
     });
 }
-
-export const ccreatedEditFileTool = createEditFileTool;

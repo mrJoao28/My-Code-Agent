@@ -85,5 +85,3 @@ export function createReadFileTool(cwd: string) {
         }
     });
 }
-
-export const createReadFIleTool = createReadFileTool;

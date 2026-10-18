@@ -9,7 +9,7 @@ Requer **Bun >= 1.3.13** disponível no PATH. Instale o Bun seguindo https://bun
 Após a publicação do pacote no npm:
 
 ```sh
-npm i -g my-code-agent
+npm i -g @j2008/my-code-agent
 cd meu-projeto
 myagent
 ```
@@ -72,7 +72,7 @@ O servidor de desenvolvimento usa loopback e porta 3000. A CUI aceita `API_URL`.
 
 ## Arquitetura e segurança
 
-- `packages/myagent`: launcher e pacote npm `my-code-agent`, comando `myagent`.
+- `packages/myagent`: launcher e pacote npm `@j2008/my-code-agent`, comando `myagent`.
 - `packages/cui`: interface, foco, diálogos, aprovação e streaming SSE.
 - `packages/server`: API privada, providers, ferramentas e ciclo de geração.
 - `packages/shared`: modelos e contratos de mensagens/eventos.

@@ -73,5 +73,3 @@ export function createWriteFileTool(cwd: string) {
         }
     });
 }
-
-export const createWriteFIleTool = createWriteFileTool;

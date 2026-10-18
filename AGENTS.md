@@ -3,7 +3,7 @@
 ## Contexto e escopo
 
 My-Code-Agent é um MVP de assistente de programação no terminal, com Bun,
-TypeScript, React/OpenTUI, Hono, Vercel AI SDK e Prisma/PostgreSQL. A prioridade
+TypeScript, React/OpenTUI, Hono, Vercel AI SDK e Prisma/SQLite local. A prioridade
 é tornar o ciclo analisar → executar ferramentas → persistir → retomar confiável.
 Prefira mudanças pequenas e verificáveis. Evite abstrações, serviços separados
 ou dependências novas sem uma necessidade concreta.
@@ -14,6 +14,8 @@ do usuário; não restaure arquivos nem remova código alheio para limpar o diff
 
 ## Mapa do repositório
 
+- `packages/myagent`: launcher, comando `myagent` e pacote npm
+  `@j2008/my-code-agent`; abre a API privada e a CUI no workspace selecionado.
 - `packages/cui`: interface de terminal; telas, componentes, diálogos, providers
   React e consumo de SSE em `src/hooks/use-chat.ts`.
 - `packages/server`: API Hono, orquestração de gerações, prompts, providers de IA
@@ -21,9 +23,12 @@ do usuário; não restaure arquivos nem remova código alheio para limpar o diff
   em `src/tools` e utilitários de caminhos/Git em `src/utils`.
 - `packages/shared`: catálogo de modelos e schemas Zod compartilhados para
   partes de mensagens e eventos de streaming.
-- `packages/database`: schema, migrations, configuração Prisma e cliente.
-  O cliente gerado fica em `packages/database/generated/prisma`.
-- `.github/workflows/ci.yml`: instalação com lockfile e execução de `bun test`.
+- `packages/database`: schema Prisma, cliente libsql e migrations SQLite
+  embutidas, aplicadas ao abrir o banco local. O cliente gerado fica em
+  `packages/database/generated/prisma`. Migrations PostgreSQL antigas estão
+  arquivadas em `prisma/migrations-postgres-legacy/`; não são usadas no runtime.
+- `.github/workflows/ci.yml`: instalação congelada, geração Prisma, typecheck,
+  testes e build em Linux/Windows; integração Docker em um job Linux separado.
 - `docs/ANALISE_PROJETO.md`: diagnóstico e melhorias propostas; descreve uma
   fotografia do MVP, não garantias de funcionalidades implementadas.
 
@@ -46,22 +51,23 @@ bun run dev:cli
 
 Os dois comandos de desenvolvimento rodam em terminais separados. A API usa
 porta 3000; a CUI aceita `API_URL` e usa `http://localhost:3000` por padrão.
-Configure `.env` a partir de `.env.example` sem sobrescrever um `.env` existente.
-Banco usa `DATABASE_URL`; busca web usa `TAVILY_API_KEY`; Ollama aceita
-`OLLAMA_BASE_URL` e `OLLAMA_API_KEY`. Chaves dos modelos cloud são determinadas
-por `getModelApiKeyEnv` em `packages/server/src/lib/model-registry.ts`.
+Consulte `.env.example` para os nomes públicos das variáveis; não sobrescreva
+um `.env` existente. Chaves e configuração do Ollama ficam em `config.env` no
+diretório global; variáveis do ambiente têm precedência. Busca web usa
+`TAVILY_API_KEY`; Ollama aceita `OLLAMA_BASE_URL` e `OLLAMA_API_KEY`. Chaves dos
+modelos cloud são determinadas por `getModelApiKeyEnv` em
+`packages/server/src/lib/model-registry.ts`.
 
-Gerar o cliente Prisma não cria as tabelas. Para um banco de desenvolvimento
-autorizado, a aplicação de migrations usa:
+O runtime usa apenas SQLite local em `~/.myagent/myagent.db`, com override pelo
+diretório `MYAGENT_HOME` (ou pelo alias legado `MYAGENT_CONFIG_DIR`). Não exige
+PostgreSQL nem `DATABASE_URL`. Gerar o cliente Prisma não abre o banco nem cria
+tabelas; as migrations embutidas são aplicadas automaticamente ao abrir o SQLite.
+`bun run --cwd packages/database db.migrate` abre e atualiza somente esse banco
+local, sem Prisma CLI em runtime ou banco externo. Confira o diretório-alvo antes
+de executá-lo. Não use `db.push`, reset ou migrations destrutivas como correção
+automática para erros de schema ou de conexão.
 
-```sh
-bun run --cwd packages/database db.migrate
-```
-
-Inspecione o banco-alvo antes de migrar. Não use `db.push`, reset ou migrations
-destrutivas como correção automática para erros de schema ou de conexão.
-
-A raiz fornece TypeScript e tipos Bun. `bun run typecheck` verifica os quatro
+A raiz fornece TypeScript e tipos Bun. `bun run typecheck` verifica os cinco
 pacotes, incluindo testes. Gere o cliente Prisma antes da checagem em um checkout
 limpo. Registre falhas de ambiente separadamente de erros do código; não declare
 typecheck aprovado só porque `bun test` passou.
@@ -78,17 +84,19 @@ typecheck aprovado só porque `bun test` passou.
 - Use `import type` para tipos. Na CUI, prefira `@myagent/database/enums` para
   enums em runtime, evitando carregar o cliente/banco ou importar caminhos
   internos de código gerado.
-- `server/src/prompts/index.ts` é a entrada usada pelo streaming. Há uma
-  implementação antiga em `server/src/system-prompt.ts`; não a trate como a
-  fonte ativa nem mantenha duas implementações divergentes.
-- O registro de modelos customizados fica em `.myagent/models.json`, relativo
-  ao diretório de execução do servidor. Não versione configurações locais.
+- `server/src/prompts/index.ts` é a entrada usada pelo streaming. Mantenha essa
+  fonte de verdade para os prompts.
+- `models.json` e `config.env` ficam em `~/.myagent`, ou no diretório indicado por
+  `MYAGENT_HOME` (fallback legado: `MYAGENT_CONFIG_DIR`), independentemente do
+  diretório de execução. Não versione configurações locais nem credenciais.
 
 ## Ferramentas, permissões e arquivos
 
 - PLAN deve continuar sem ferramentas que alterem o código do projeto. A lista
   de ferramentas é definida no backend por `createTools`, não só pelo prompt.
-  `todo_write` mantém estado em memória; `type_check` executa um processo.
+  `todo_write` mantém estado em memória; `type_check` e `test_run` executam
+  processos isolados. Ferramentas de processo só são oferecidas com Docker
+  disponível; Docker é opcional para abrir o aplicativo.
 - Novas ferramentas precisam de schema Zod, descrição fiel, limites de entrada
   e saída e tratamento explícito de erro. Classifique os efeitos antes de
   disponibilizá-las em PLAN ou BUILD.
@@ -96,7 +104,7 @@ typecheck aprovado só porque `bun test` passou.
   cubra traversal, symlinks/junctions, ancestrais inexistentes e volumes Windows.
   Links/junctions, hard links e caminhos sensíveis são recusados. Validação no
   host não é sandbox contra outro processo trocando arquivos durante operações.
-- Shell e type_check só executam na sandbox Docker configurada, sem rede e com
+- Shell, type_check e test_run só executam na sandbox Docker configurada, sem rede e com
   snapshot filtrado somente leitura. Não reintroduza fallback de execução no host.
   A política central exige aprovação antes de efeitos colaterais e rede.
 - A API local usa token privado, rejeita clientes de navegador e limita workspaces.
@@ -119,16 +127,21 @@ typecheck aprovado só porque `bun test` passou.
   do transporte, isoladamente, não é prova de conclusão bem-sucedida.
 - Não repita automaticamente ferramentas com efeitos colaterais ao retomar.
   Preserve seus resultados e identifique a geração à qual pertencem.
-- Ao trabalhar em histórico, considere `parts`, status e pares de chamada/resultado;
-  o histórico atual de texto perde informação das ferramentas entre turnos.
+- O histórico é reconstruído de `parts`, status e pares de chamada/resultado e
+  salvo em `SessionContext`. Chamadas sem resultado viram avisos; a janela de
+  contexto pode abreviar conteúdo e omitir turnos antigos, preservando os pares
+  completos e o histórico persistido. Preserve essas regras ao alterar a retomada.
 - Ao persistir mensagens, mantenha a atividade da sessão atualizada. Não deixe
   falhas de persistência ou de envio SSE causarem mensagens finais duplicadas.
-- Locks e todos atuais ficam em memória e são locais ao processo. Não assuma
-  exclusão mútua entre instâncias nem recuperação após reinício.
+- Locks de geração e todos ficam em memória e são locais ao processo. O launcher
+  usa também leases de sessão no SQLite para exclusão entre processos, com
+  heartbeat de 5 segundos e expiração de 30 segundos. Não confunda esses leases
+  com recuperação dos estados em memória após reinício.
 
 ## Banco de dados
 
-- Altere o schema fonte e crie migration quando necessário; não edite o cliente
+- Altere o schema fonte e adicione uma migration SQLite ao runner embutido
+  (`packages/database/src/migrations.ts`) quando necessário; não edite o cliente
   Prisma gerado nem migrations já aplicadas para mudar seu efeito retroativamente.
 - Considere compatibilidade das mensagens/parts existentes e índices para os
   padrões de leitura. Mudanças de enum e JSON persistido exigem cuidado na CUI.
@@ -140,8 +153,9 @@ typecheck aprovado só porque `bun test` passou.
 - Execute `bun test` e o typecheck dos pacotes afetados quando houver mudança
   de código. Use testes de regressão para bugs, contratos e limites de segurança;
   não crie testes artificiais para alterações só de documentação ou estilo.
-- A suíte cobre contratos, sessões, geração simulada, tools e segurança. Banco,
-  providers e rede são simulados nos testes normais. Testes reais de container
+- A suíte cobre contratos, sessões, geração simulada, tools e segurança. Providers
+  e rede são simulados; há testes de SQLite local em diretórios temporários e
+  testes de serviços com mocks de banco. Testes reais de container
   usam `bun run test:integration` com `MYAGENT_TEST_DOCKER_IMAGE` configurada.
   Não confunda testes ignorados por falta de Docker com integração aprovada.
 - Para streaming e sessão, verifique cenários de erro, cancelamento, reload e

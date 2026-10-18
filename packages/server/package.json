@@ -15,7 +15,6 @@
         "@ai-sdk/openai-compatible": "^3.0.17",
         "@ai-sdk/provider": "^4.0.4",
         "@ai-sdk/provider-utils": "^5.0.15",
-        "@clerk/backend": "^3.14.0",
         "@hono/zod-validator": "^0.9.0",
         "@myagent/database": "workspace:*",
         "@myagent/shared": "workspace:*",
