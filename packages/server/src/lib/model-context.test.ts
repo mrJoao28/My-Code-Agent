@@ -13,11 +13,11 @@ test("models.json accepts custom and Ollama windows and rejects invalid values",
     const models = parseCustomModels([
         { id: "local", provider: "ollama", contextWindow: 131_072 },
         { id: "cloud", provider: "openai" },
-        ...[0, -1, 1.5, "200000", 100, Number.MAX_SAFE_INTEGER].map(contextWindow => ({ id: "bad", provider: "ollama", contextWindow })),
     ]);
     expect(models).toHaveLength(2);
     expect(models[0]?.contextWindow).toBe(131_072);
     expect(models[1]?.contextWindow).toBe(DEFAULT_MODEL_CONTEXT_WINDOW);
-    expect(parseCustomModels({})).toEqual([]);
-    expect(parseCustomModels([null, {}, { id: "x", provider: "bogus" }])).toEqual([]);
+    expect(() => parseCustomModels({})).toThrow("models.json inválido");
+    for (const contextWindow of [0, -1, 1.5, "200000", 100, Number.MAX_SAFE_INTEGER]) expect(() => parseCustomModels([{ id: "bad", provider: "ollama", contextWindow }])).toThrow();
+    expect(() => parseCustomModels([null, {}, { id: "x", provider: "bogus" }])).toThrow();
 });

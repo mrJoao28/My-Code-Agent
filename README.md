@@ -59,6 +59,64 @@ exibido e N nega. Exclusão e commit sempre pedem aprovação individual. O coma
 os checkpoints ficam no diretório global, sem commits no projeto. Veja
 [aprovações e desfazer](docs/APROVACOES_E_UNDO.md).
 
+## Dados enviados e login ChatGPT
+
+O agente envia ao **provedor do modelo selecionado** o pedido, o system prompt,
+as instruções `AGENTS.md`, o histórico que couber na janela de contexto, os schemas
+das ferramentas e seus resultados (incluindo conteúdo de arquivos, diffs, caminhos,
+saídas de comandos e páginas consultadas). Isso pode incluir dados privados do
+projeto. A aplicação não envia o workspace inteiro automaticamente; qualquer
+conteúdo lido por uma ferramenta pode entrar nas próximas requisições ao modelo.
+Não coloque segredos nos pedidos, instruções ou arquivos que o agente vai ler.
+
+| Destino | O que recebe |
+| --- | --- |
+| Anthropic, OpenAI ou Google por API key | Contexto descrito acima, identificador do modelo e a chave desse provedor para autenticação. As outras chaves locais não são anexadas ao contexto. |
+| Ollama | O mesmo contexto no `OLLAMA_BASE_URL` configurado, com `OLLAMA_API_KEY` se definida. É local apenas se esse endereço apontar para seu computador; um endpoint remoto recebe o código. |
+| OpenAI com login ChatGPT | Contexto e ferramentas em `https://api.openai.com/v1/responses`, autenticados por token OAuth da conta ativa. A requisição usa `store: false`, o que não constitui promessa de retenção zero ou dispensa das políticas do serviço. |
+| Tavily (`web_search`) | A consulta produzida pelo modelo e a chave Tavily; a consulta pode conter trechos do projeto. |
+| Site consultado (`web_fetch`) | URL completa, caminho/query, cabeçalhos HTTP e IP de origem da conexão. Fragmentos de URL não são enviados em HTTP. O site não recebe as chaves dos modelos nem o histórico inteiro. |
+
+`web_fetch` aceita somente destinos públicos: resolve o DNS uma vez por destino,
+recusa respostas com qualquer IP interno/reservado e conecta ao IP validado,
+preservando Host e verificação TLS/SNI. Cada redirect é validado novamente.
+Redirect para outro domínio exige nova chamada quando a aprovação vale por domínio.
+Não usa cookies do navegador, proxy do ambiente nem credenciais embutidas na URL.
+
+**O login ChatGPT fica desligado por padrão.** Para habilitar, defina
+`MYAGENT_ENABLE_CHATGPT=1` no ambiente ou em `~/.myagent/config.env` e reinicie o
+aplicativo. Outras configurações desse valor não habilitam o login. Depois use
+“Continuar com ChatGPT / gerenciar contas”; habilitar a variável não faz login
+sozinho. Sem a opção, o servidor bloqueia login, descoberta de modelos e uso de
+credenciais ChatGPT já salvas.
+
+O fluxo implementado neste projeto abre o navegador em `auth.openai.com`, solicita
+autorização OAuth com PKCE (`S256`), state e nonce, e recebe o código em um callback
+loopback temporário. Solicita identidade/perfil/email, acesso offline e permissões
+`resource.invoke` e `chatgpt.tokens.use.direct`. Troca o código por tokens e pode
+renová-los para continuar usando a conta. A senha é digitada no site de autenticação,
+nunca na CUI. Identificadores da conta, catálogo e tokens de acesso/renovação/identidade
+ficam em `chatgpt-credentials.json`, sem criptografia própria; no POSIX há proteção
+por modo `0600` e no Windows a proteção depende das ACLs do perfil.
+
+Esses tokens permitem agir com as permissões concedidas: proteja também cópias de
+segurança do diretório global. Desconectar apaga os tokens locais e tenta a revogação
+remota quando a integração está habilitada; uma falha de revogação é informada.
+Desabilitar a variável impede o uso, mas não apaga nem revoga credenciais já salvas.
+O fluxo é uma implementação deste aplicativo, não uma garantia de compatibilidade
+com todo plano/conta; endpoints, permissões, limites e elegibilidade podem mudar.
+Confira a autorização no navegador e os controles da conta antes de enviar código.
+Consulte a [documentação oficial de autenticação](https://developers.openai.com/codex/auth)
+e os [controles de dados da API OpenAI](https://developers.openai.com/api/docs/guides/your-data);
+as condições aplicáveis dependem do serviço e da conta, não apenas de `store: false`.
+
+`config.env` e `models.json` são gravados por temporário no mesmo diretório e troca
+atômica, com modo `0600` no POSIX; permissões abertas são ajustadas antes da leitura.
+As chaves ficam mascaradas durante a digitação/colagem na CUI. A máscara não cifra
+os arquivos. `models.json` precisa ser JSON válido e passar pelo schema de modelos;
+em caso de corrupção o aplicativo informa o erro e preserva o arquivo para correção,
+em vez de assumir um catálogo vazio.
+
 ## Desenvolvimento
 
 Use o workspace da raiz e Bun:
@@ -88,7 +146,7 @@ O servidor de desenvolvimento usa loopback e porta 3000. A CUI aceita `API_URL`.
 - `packages/shared`: modelos e contratos de mensagens/eventos.
 - `packages/database`: Prisma 7.4.0, libsql, migrations embutidas e abertura local.
 
-PLAN continua sem ferramentas que alterem o código. BUILD exige aprovação para alterações e processos. O prompt de BUILD orienta criar instruções e resumos por pasta. A API recusa clientes de navegador, exige token privado e valida o workspace da sessão antes de carregá-la ou continuar uma geração.
+PLAN continua sem ferramentas que alterem o código. BUILD exige aprovação para alterações e rede; processos só executam na sandbox Docker. Uma tarefa comum não cria documentação automaticamente. A API recusa clientes de navegador, exige token privado e valida o workspace da sessão antes de carregá-la ou continuar uma geração.
 
 As migrations antigas do PostgreSQL estão arquivadas em `packages/database/prisma/migrations-postgres-legacy/`. Dados antigos do PostgreSQL **não são importados**; bancos e volumes existentes não são apagados.
 

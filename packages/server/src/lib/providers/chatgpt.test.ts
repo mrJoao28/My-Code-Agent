@@ -15,7 +15,7 @@ function connected(root: string) {
         tokens: { access: "fixture-access", refresh: "fixture-refresh", id: "fixture-id", expiresAt: Date.now() + 3_600_000, scopes: ["resource.invoke", "chatgpt.tokens.use.direct"] },
         models: [{ slug: "fixture-model", name: "Fixture model" }],
     }] });
-    return new ChatGPTService({ store });
+    return new ChatGPTService({ enabled: () => true, store });
 }
 function sse(events: unknown[]) {
     return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "Content-Type": "text/event-stream" } });

@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { parseCustomModels, readModelConfig, writeModelConfig } from "./model-config";
+export { parseCustomModels } from "./model-config";
+import { join } from "node:path";
 import { myagentHome } from "@myagent/shared/home";
 import { chatGPT } from "./chatgpt";
 import {
@@ -29,35 +30,8 @@ export function getModelApiKeyEnv(model: Pick<SupportedChatModelDefinition, "id"
   return `MYAGENT_${model.provider.toUpperCase()}_${normalized}_API_KEY`;
 }
 
-function ensureConfigDirectory() {
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-}
-
-export function parseCustomModels(parsed: unknown): CustomModel[] {
-  if (!Array.isArray(parsed)) return [];
-  return parsed.filter((model): model is CustomModel => model && typeof model === "object"
-    && typeof model.id === "string" && ["anthropic", "openai", "google", "ollama"].includes(model.provider)
-    && (model.contextWindow === undefined || validContextWindow(model.contextWindow)))
-    .map(model => ({ ...model, contextWindow: model.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW,
-      pricing: model.pricing ?? SUPPORTED_CHAT_MODELS.find(base => base.id === model.id)?.pricing
-        ?? { inputUsdPerMillionTokens: 0, outputUsdPerMillionTokens: 0 } }));
-}
-
-function readCustomModels(): CustomModel[] {
-  if (!existsSync(CONFIG_PATH)) return [];
-
-  try {
-    const parsed = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
-    return parseCustomModels(parsed);
-  } catch {
-    return [];
-  }
-}
-
-function writeCustomModels(models: CustomModel[]) {
-  ensureConfigDirectory();
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(models, null, 2)}\n`, "utf8");
-}
+function readCustomModels(): CustomModel[] { return readModelConfig(CONFIG_PATH); }
+function writeCustomModels(models: CustomModel[]) { writeModelConfig(CONFIG_PATH, models); }
 
 export function getCustomModels(): CustomModel[] {
   return readCustomModels();
@@ -112,7 +86,7 @@ export function addCustomModel(input: {
   };
 
   const models = readCustomModels();
-  models.push(model);
+  models.push(parseCustomModels([model])[0]!);
   writeCustomModels(models);
   return model;
 }

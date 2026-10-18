@@ -31,6 +31,7 @@ type Pending = {
     listener: Listener; timer: ReturnType<typeof setTimeout>; controller: AbortController;
 };
 type Options = {
+    enabled?: () => boolean;
     store?: ChatGPTStore; fetch?: typeof fetch;
     listen?: (handler: (request: Request) => Promise<Response>) => Listener;
     verify?: (token: string, clientId: string, nonce?: string) => Promise<JWTPayload>;
@@ -48,20 +49,25 @@ export class ChatGPTService {
         this.store = options.store ?? new ChatGPTStore();
         this.fetcher = options.fetch ?? fetch;
     }
+    enabled() { return this.options.enabled?.() ?? process.env.MYAGENT_ENABLE_CHATGPT === "1"; }
+    private requireEnabled() { if (!this.enabled()) throw new Error("Login ChatGPT desativado. Defina MYAGENT_ENABLE_CHATGPT=1 para habilitar."); }
     status() {
+        if (!this.enabled()) return { enabled: false, connected: false, accounts: [] };
         const state = this.store.read();
         return {
+            enabled: true,
             accounts: state.accounts.map(a => ({ id: a.clientId, label: a.label, connected: Boolean(a.tokens), active: a.clientId === state.activeId })),
             connected: state.accounts.some(a => a.clientId === state.activeId && a.tokens),
         };
     }
     models(): SupportedChatModelDefinition[] {
+        if (!this.enabled()) return [];
         const state = this.store.read();
         const account = state.accounts.find(a => a.clientId === state.activeId);
         if (!account?.tokens) return [];
         return account.models.map(m => ({ id: `chatgpt:${m.slug}`, displayName: m.name, provider: "chatgpt", contextWindow: findSupportedChatModel(m.slug)?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW, pricing: { inputUsdPerMillionTokens: 0, outputUsdPerMillionTokens: 0 } }));
     }
-    activeId() { return this.store.read().activeId; }
+    activeId() { return this.enabled() ? this.store.read().activeId : undefined; }
     signal(clientId: string): AbortSignal {
         let controller = this.connections.get(clientId);
         if (!controller) { controller = new AbortController(); this.connections.set(clientId, controller); }
@@ -71,6 +77,7 @@ export class ChatGPTService {
         if (clientId) { this.connections.get(clientId)?.abort(); this.connections.delete(clientId); }
     }
     private async json(url: string, init: RequestInit = {}, signal?: AbortSignal) {
+        this.requireEnabled();
         const response = await this.fetcher(url, { ...init, redirect: "error", signal: AbortSignal.any([AbortSignal.timeout(15_000), ...(signal ? [signal] : [])]) });
         if (!response.ok) {
             let code: string | undefined;
@@ -120,6 +127,7 @@ export class ChatGPTService {
         return { redirect: `http://127.0.0.1:${server.port}/auth/callback`, stop: () => { void server.stop(); } };
     }
     async startLogin(clientId?: string) {
+        this.requireEnabled();
         this.cancelLogin();
         await this.exchange?.catch(() => {});
         const state = await this.store.locked(async () => { const value = this.store.read(); this.store.write(value); return value; });
@@ -207,6 +215,7 @@ export class ChatGPTService {
         }
     }
     async accessToken(clientId: string, signal?: AbortSignal): Promise<string> {
+        this.requireEnabled();
         signal?.throwIfAborted();
         const state = this.store.read();
         const account = state.accounts.find(a => a.clientId === clientId);
@@ -251,6 +260,7 @@ export class ChatGPTService {
         });
     }
     async refreshModels(signal?: AbortSignal) {
+        this.requireEnabled();
         const clientId = this.activeId();
         if (!clientId) return [];
         const token = await this.accessToken(clientId, signal);
@@ -267,6 +277,7 @@ export class ChatGPTService {
         return this.models();
     }
     async activate(clientId: string) {
+        this.requireEnabled();
         this.cancelLogin();
         await this.exchange?.catch(() => {});
         const previous = this.activeId();
@@ -288,7 +299,7 @@ export class ChatGPTService {
             if (!account) throw new Error("Conta ChatGPT não encontrada.");
             let revoked = !account.tokens;
             try {
-                if (account.tokens) {
+                if (account.tokens && this.enabled()) {
                     const { revocation_endpoint } = await this.metadata();
                     const response = await this.fetcher(revocation_endpoint, { method: "POST", redirect: "error", signal: AbortSignal.timeout(10_000),
                         body: new URLSearchParams({ token: account.tokens.refresh, token_type_hint: "refresh_token", client_id: clientId }) });

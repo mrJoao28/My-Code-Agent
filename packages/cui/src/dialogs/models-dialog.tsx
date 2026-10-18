@@ -1,3 +1,5 @@
+import { getErrorMessage } from "../lib/http-errors";
+import { SecretInput } from "../components/secret-input";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TextAttributes, TextareaRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
@@ -21,6 +23,7 @@ const PROVIDERS: { id: Exclude<SupportedProvider, "chatgpt">; label: string; kin
 export const ModelDialogContent = ({ onSelectModel }: Props) => {
   const dialog = useDialog();
   const [models, setModels] = useState<Model[]>([]);
+  const [loadError, setLoadError] = useState("");
   const [adding, setAdding] = useState(false);
   const [configuring, setConfiguring] = useState<Model | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -28,10 +31,9 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
   const loadModels = useCallback(async () => {
     try {
       const response = await appClient.models.$get();
-      if (response.ok) setModels((await response.json()) as Model[]);
-    } catch {
-      // The list remains empty if the API is unavailable.
-    }
+      if (!response.ok) throw new Error(await getErrorMessage(response));
+      setModels((await response.json()) as Model[]); setLoadError("");
+    } catch (error) { setLoadError(error instanceof Error ? error.message : "Não foi possível carregar models.json."); }
   }, []);
 
   useEffect(() => { void loadModels(); }, [loadModels]);
@@ -72,6 +74,8 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
   const items = [connectItem, addItem, ...models];
 
   return (
+    <box flexDirection="column">
+    {loadError && <text fg="red">{loadError}</text>}
     <DialogSearchList
       items={items}
       onSelect={(item) => item.id === connectItem.id ? setConnecting(true) : item.id === addItem.id ? setAdding(true) : select(item)}
@@ -92,6 +96,7 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
       placeholder="Search models..."
       emptyText="No models found"
     />
+    </box>
   );
 };
 
@@ -102,18 +107,18 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
   const [providerIndex, setProviderIndex] = useState(0);
   const [modelName, setModelName] = useState("");
   const [token, setToken] = useState("");
+  const tokenValue = useRef("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [field, setField] = useState<"model" | "token">("model");
   const modelRef = useRef<TextareaRenderable>(null);
-  const tokenRef = useRef<TextareaRenderable>(null);
   const provider = PROVIDERS[providerIndex]!;
   const isCloud = provider.kind === "Cloud";
 
   const submit = useCallback(async () => {
     if (saving) return;
     const id = modelRef.current?.plainText.trim() || modelName.trim();
-    const apiToken = tokenRef.current?.plainText.trim() || token.trim();
+    const apiToken = tokenValue.current.trim();
     if (!id) return setError("Model name is required");
     if (isCloud && !apiToken) return setError("API key is required for cloud models");
 
@@ -158,8 +163,8 @@ function AddModelForm({ onCreated, onCancel }: AddModelFormProps) {
       {isCloud && (
         <box flexDirection="column" gap={0.5}>
           <text>API key</text>
-          <textarea ref={tokenRef} focused={field === "token"} width="100%" height={1} initialValue={token} placeholder="Required for this cloud model" onContentChange={() => setToken(tokenRef.current?.plainText ?? "")} />
-          <text attributes={TextAttributes.DIM}>Stored locally in .env. Never returned by the API.</text>
+          <SecretInput value={token} onChange={value => { tokenValue.current = value; setToken(value); }} focused={field === "token"} />
+          <text attributes={TextAttributes.DIM}>Salva em ~/.myagent/config.env (ou MYAGENT_HOME), sem retorno pela API.</text>
         </box>
       )}
       {error && <text fg={colors.error}>{error}</text>}
@@ -173,12 +178,12 @@ type ConfigureKeyProps = { model: Model; onConfigured: () => void; onCancel: () 
 function ConfigureKeyForm({ model, onConfigured, onCancel }: ConfigureKeyProps) {
   const { colors } = useTheme();
   const [token, setToken] = useState("");
+  const tokenValue = useRef("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const ref = useRef<TextareaRenderable>(null);
 
   const submit = useCallback(async () => {
-    const value = ref.current?.plainText.trim() || token.trim();
+    const value = tokenValue.current.trim();
     if (!value) return setError("API key is required");
     setSaving(true); setError(null);
     try {
@@ -205,8 +210,8 @@ function ConfigureKeyForm({ model, onConfigured, onCancel }: ConfigureKeyProps) 
       <text attributes={TextAttributes.BOLD}>API key required</text>
       <text>Configure a key before using:</text>
       <text fg={colors.primary}>{model.id}</text>
-      <textarea ref={ref} focused width="100%" height={1} initialValue={token} placeholder="Paste API key" onContentChange={() => setToken(ref.current?.plainText ?? "")} />
-      <text attributes={TextAttributes.DIM}>The key is saved locally in .env and never displayed again.</text>
+      <SecretInput value={token} onChange={value => { tokenValue.current = value; setToken(value); }} />
+      <text attributes={TextAttributes.DIM}>A chave fica em ~/.myagent/config.env (ou MYAGENT_HOME).</text>
       {error && <text fg={colors.error}>{error}</text>}
       <text attributes={TextAttributes.DIM}>{saving ? "Saving..." : "Enter save · Esc cancel"}</text>
     </box>

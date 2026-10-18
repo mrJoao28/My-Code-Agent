@@ -9,6 +9,7 @@ type Account = { id: string; label: string; connected: boolean; active: boolean 
 type Props = { onBack: () => void; onConnected: () => void };
 
 export function ChatGPTDialogContent({ onBack, onConnected }: Props) {
+    const [enabled, setEnabled] = useState(false);
     const { colors } = useTheme();
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [message, setMessage] = useState("");
@@ -25,6 +26,7 @@ export function ChatGPTDialogContent({ onBack, onConnected }: Props) {
         const response = await appClient.chatgpt.$get(undefined, options());
         if (!response.ok) throw new Error("Não foi possível consultar a conexão ChatGPT.");
         const data = await response.json();
+        setEnabled(data.enabled !== false);
         if (alive.current && "accounts" in data) setAccounts(data.accounts);
     }, []);
     useEffect(() => {
@@ -112,6 +114,11 @@ export function ChatGPTDialogContent({ onBack, onConnected }: Props) {
         ]),
         { id: "usage", text: "Gerenciar uso do plano ChatGPT", run: async () => { await action(() => openBrowser("https://chatgpt.com/settings/usage")); } },
     ];
+    if (!enabled) return <box flexDirection="column" gap={1}>
+        <text>Login ChatGPT desativado por padrão.</text>
+        <text>Para habilitar, defina MYAGENT_ENABLE_CHATGPT=1 e reinicie o myagent.</text>
+        <text onMouseDown={onBack}>Esc: fechar · clique para voltar</text>
+    </box>;
     return <box flexDirection="column" gap={1}>
         <text attributes={TextAttributes.BOLD}>Conectar ChatGPT</text>
         <text attributes={TextAttributes.DIM}>Use seu plano elegível. O uso respeita os limites da conta.</text>

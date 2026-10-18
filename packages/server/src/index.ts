@@ -1,3 +1,4 @@
+import { ModelConfigError } from "./lib/model-config";
 import { recoverOrphanedGenerations } from "./services/generation-journal";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -51,6 +52,7 @@ app.use(async (c, next) => {
 
 app.onError((error, c) => {
   const requestId = c.get("requestId") ?? "unknown";
+  if (error instanceof ModelConfigError) return c.json({ error: error.message }, 503);
   if (error instanceof SessionBusyError) return c.json({ error: error.message }, 409);
   if (error instanceof UnsafePathError) return c.json({ error: error.message }, 403);
   if (error instanceof PathNotFoundError) return c.json({ error: error.message }, 404);

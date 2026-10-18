@@ -1,5 +1,9 @@
 import { test, expect, spyOn } from "bun:test";
-import { createWebFetchTool } from "./web-fetch";
+import { createWebFetchTool as realWebFetchTool } from "./web-fetch";
+
+function createWebFetchTool(sameOriginOnly = false) {
+    return realWebFetchTool(sameOriginOnly, { resolve: async () => [{ address: "93.184.216.34", family: 4 }], request: (url, _address, signal) => fetch(url, { signal, redirect: "manual" }) });
+}
 
 test("session domain permission cannot follow a redirect to another origin", async () => {
     const fetch = stubFetch(async () => new Response(null, { status: 302, headers: { Location: "https://93.184.216.35/other" } }));

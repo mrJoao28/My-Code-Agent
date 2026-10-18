@@ -8,6 +8,28 @@ import { ChatGPTService } from "./chatgpt";
 import { ChatGPTStore } from "./chatgpt-store";
 import { boundedJSON } from "./bounded-json";
 import { createChatGPTRoutes } from "../routes/chatgpt";
+
+test("ChatGPT is disabled by default and the server rejects login/model refresh without touching credentials or network", withFixture(async ({ root }) => {
+    const previous = process.env.MYAGENT_ENABLE_CHATGPT;
+    delete process.env.MYAGENT_ENABLE_CHATGPT;
+    let fetched = 0;
+    const store = new ChatGPTStore(join(root, "disabled.json"));
+    const service = new ChatGPTService({ store, fetch: (async () => { fetched++; throw new Error("unreachable"); }) as never });
+    try {
+        for (const value of [undefined, "0", "true", "yes"]) {
+            if (value === undefined) delete process.env.MYAGENT_ENABLE_CHATGPT; else process.env.MYAGENT_ENABLE_CHATGPT = value;
+            expect(service.status()).toEqual({ enabled: false, connected: false, accounts: [] });
+            expect(service.models()).toEqual([]);
+            await expect(service.startLogin()).rejects.toThrow("MYAGENT_ENABLE_CHATGPT=1");
+            await expect(service.accessToken("fixture")).rejects.toThrow("desativado");
+            expect((await createChatGPTRoutes(service).request("/login", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(403);
+            expect((await createChatGPTRoutes(service).request("/models", { method: "POST" })).status).toBe(403);
+        }
+        expect(fetched).toBe(0);
+        process.env.MYAGENT_ENABLE_CHATGPT = "1";
+        expect(service.status().enabled).toBe(true);
+    } finally { if (previous === undefined) delete process.env.MYAGENT_ENABLE_CHATGPT; else process.env.MYAGENT_ENABLE_CHATGPT = previous; }
+}));
 import { localAuthentication } from "../security/auth";
 import { withFixture } from "../test-support";
 
@@ -20,7 +42,7 @@ function runtime(path: string, fetcher: (url: string, init?: RequestInit) => Pro
     let callback!: (request: Request) => Promise<Response>;
     let stopped = 0;
     const store = new ChatGPTStore(path);
-    const service = new ChatGPTService({ store, fetch: fetcher as typeof fetch, verify, loginTimeoutMs, listen: handler => {
+    const service = new ChatGPTService({ enabled: () => true, store, fetch: fetcher as typeof fetch, verify, loginTimeoutMs, listen: handler => {
         callback = handler;
         return { redirect: "http://127.0.0.1:1455/auth/callback", stop: () => { stopped++; } };
     } });
@@ -65,7 +87,7 @@ describe("ChatGPT OAuth", () => {
         expect(app.stopped()).toBe(1);
         const models = await app.service.refreshModels();
         expect(models.map(model => model.id)).toEqual(["chatgpt:fixture-model"]);
-        expect(new ChatGPTService({ store: app.store }).models()).toEqual(models);
+        expect(new ChatGPTService({ enabled: () => true, store: app.store }).models()).toEqual(models);
         expect(JSON.stringify(app.service.status())).not.toContain("fixture-access");
         expect(JSON.stringify(app.service.status())).not.toContain("fixture-refresh");
         if (process.platform !== "win32") expect((await lstat(app.store.path)).mode & 0o077).toBe(0);
@@ -236,7 +258,7 @@ describe("ChatGPT OAuth", () => {
     }));
 
     test("real loopback callback listener closes after completing login", withFixture(async ({ root }) => {
-        const service = new ChatGPTService({ store: new ChatGPTStore(join(root, "chatgpt-credentials.json")),
+        const service = new ChatGPTService({ enabled: () => true, store: new ChatGPTStore(join(root, "chatgpt-credentials.json")),
             fetch: (async () => Response.json(returnedTokens)) as unknown as typeof fetch, verify: identity });
         const login = await service.startLogin();
         try {

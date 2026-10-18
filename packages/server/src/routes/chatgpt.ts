@@ -8,6 +8,10 @@ export function createChatGPTRoutes(service: ChatGPTService = chatGPT) {
     return new Hono()
         .onError((_error, c) => c.json({ error: "Não foi possível atualizar a conexão ChatGPT. Tente novamente ou conecte a conta outra vez." }, 400))
         .get("/", c => c.json(service.status()))
+        .use("*", async (c, next) => {
+            if (!service.enabled() && c.req.method !== "DELETE") return c.json({ error: "Login ChatGPT desativado. Defina MYAGENT_ENABLE_CHATGPT=1 para habilitar." }, 403);
+            await next();
+        })
         .post("/login", zValidator("json", z.object({ accountId: z.string().max(200).optional() })), async c => {
             const login = await service.startLogin(c.req.valid("json").accountId);
             if (c.req.raw.signal.aborted) { service.cancelLogin(login.id); return c.json({ error: "Login cancelado." }, 400); }

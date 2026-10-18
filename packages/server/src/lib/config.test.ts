@@ -15,7 +15,7 @@ test("global config reloads custom model keys, preserves environment precedence 
     const key = "MYAGENT_FIXTURE_CUSTOM_SECRET", previous = process.env[key];
     const path = join(root, "config.env"), models = join(root, "models.json");
     await writeFile(path, `${key}=fixture-value\nMYAGENT_WORKSPACE_ROOTS=invalid\n`);
-    await writeFile(models, JSON.stringify([{ apiKeyEnv: key }, { apiKeyEnv: "MYAGENT_WORKSPACE_ROOTS" }]));
+    await writeFile(models, JSON.stringify([{ id: "fixture", provider: "openai", apiKeyEnv: key }]));
     const roots = process.env.MYAGENT_WORKSPACE_ROOTS;
     try {
         delete process.env[key];
