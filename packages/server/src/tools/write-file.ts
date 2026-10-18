@@ -1,14 +1,18 @@
 import { dirname, join } from "path";
-import { writeFile, mkdir, rename, copyFile, unlink, lstat, link } from "fs/promises";
+import { open, mkdir, rename, copyFile, unlink, lstat, link } from "fs/promises";
 import { randomUUID } from "crypto";
 import { tool } from "ai";
 import { z } from "zod";
 import { resolveSafePath, toRelative } from "../utils/path";
 
-async function atomicWrite(targetPath: string, content: string, overwrite: boolean): Promise<void> {
+async function atomicWrite(targetPath: string, content: string, overwrite: boolean, mode: number): Promise<void> {
     const tmpPath = join(dirname(targetPath), `.${randomUUID()}.tmp`);
     try {
-        await writeFile(tmpPath, content, { encoding: "utf-8", flag: "wx", mode: 0o600 });
+        const handle = await open(tmpPath, "wx", mode);
+        try {
+            await handle.writeFile(content, "utf-8");
+            if (process.platform !== "win32") await handle.chmod(mode);
+        } finally { await handle.close(); }
         if (overwrite) await rename(tmpPath, targetPath);
         else { await link(tmpPath, targetPath); await unlink(tmpPath); }
     } catch (e) {
@@ -62,7 +66,7 @@ export function createWriteFileTool(cwd: string) {
 
             await mkdir(dirname(resolvedPath), { recursive: true });
             await resolveSafePath(cwd, resolvedPath, { mustExist: false });
-            await atomicWrite(resolvedPath, content, shouldOverwrite);
+            await atomicWrite(resolvedPath, content, shouldOverwrite, existing ? existing.mode & 0o777 : 0o644);
 
             return {
                 path: toRelative(cwd, resolvedPath),

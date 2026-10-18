@@ -16,7 +16,7 @@ describe("Existing file tools", () => {
     test("write creates directories; read supports lines; edit replaces once", withFixture(async ({ cwd }) => {
         const result = await execute(createWriteFileTool(cwd), { path: "src/a.ts", content: "first\nsecond\nthird" });
         expect(result.bytesWritten).toBe(18);
-        expect((await execute(createReadFileTool(cwd), { path: "src/a.ts", offset: 1, limit: 1 })).content).toBe("second");
+        expect((await execute(createReadFileTool(cwd), { path: "src/a.ts", offset: 1, limit: 1 })).content).toBe("2: second");
         await execute(createEditFileTool(cwd), { path: "src/a.ts", old_str: "second", new_str: "changed" });
         expect(await readFile(join(cwd, "src/a.ts"), "utf8")).toContain("changed");
         await expect(execute(createEditFileTool(cwd), { path: "src/a.ts", old_str: "missing", new_str: "x" })).rejects.toThrow();
@@ -43,7 +43,7 @@ describe("Existing file tools", () => {
         expect(await readFile(join(cwd, "a.bak"), "utf8")).toBe("original");
     }));
     test("read truncates output and rejects directories and oversized files", withFixture(async ({ cwd }) => {
-        await writeFile(join(cwd, "big"), "a".repeat(10_100));
+        await writeFile(join(cwd, "big"), "a".repeat(9_000) + "\n" + "b".repeat(2_000));
         expect((await execute(createReadFileTool(cwd), { path: "big" })).truncated).toBe(true);
         await expect(execute(createReadFileTool(cwd), { path: "." })).rejects.toThrow();
         await expect(execute(createWriteFileTool(cwd), { path: ".", content: "bad" })).rejects.toThrow("arquivo regular");

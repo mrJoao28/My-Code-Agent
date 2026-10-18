@@ -16,6 +16,24 @@ function excerpt(text: string): string {
     return text.length <= 4_000 ? text : text.slice(0, 3_000) + "\n[conteúdo abreviado]\n" + text.slice(-1_000);
 }
 
+// Páginas limitadas de read_file mantêm conteúdo e nextOffset juntos no contexto.
+function isReadFilePage(name: string, text: string): boolean {
+    if (name !== "read_file" || text.length > 131_072) return false;
+    try {
+        const page = JSON.parse(text) as Record<string, unknown>;
+        if (!page || typeof page !== "object" || Array.isArray(page)) return false;
+        return typeof page.path === "string" && page.path.length <= 32_768
+            && typeof page.content === "string" && page.content.length <= 10_000
+            && typeof page.totalLines === "number" && Number.isSafeInteger(page.totalLines) && page.totalLines >= 0
+            && typeof page.truncated === "boolean"
+            && (page.nextOffset === undefined ? !page.truncated
+                : typeof page.nextOffset === "number" && Number.isSafeInteger(page.nextOffset) && page.nextOffset >= 0);
+    } catch { return false; }
+}
+function excerptToolResult(name: string, text: string): string {
+    return isReadFilePage(name, text) ? text : excerpt(text);
+}
+
 /** Reconstrói evidências, sem reasoning interno nem chamadas órfãs executáveis. */
 export function contextFromMessages(rows: readonly SourceMessage[]): ModelMessage[] {
     const messages: ModelMessage[] = [];
@@ -39,10 +57,10 @@ export function contextFromMessages(rows: readonly SourceMessage[]): ModelMessag
             if (!result || result.type !== "tool-result") {
                 messages.push({ role: "assistant", content: `[Chamada ${part.name}, id ${part.id}: resultado indisponível. Não repetir automaticamente efeitos colaterais.]` });
             } else if (JSON.stringify(part.args).length > 8_000) {
-                messages.push({ role: "assistant", content: `[Resultado registrado de ${part.name}, id ${part.id}; argumentos omitidos por tamanho]\n${excerpt(result.result)}` });
+                messages.push({ role: "assistant", content: `[Resultado registrado de ${part.name}, id ${part.id}; argumentos omitidos por tamanho]\n${isReadFilePage(part.name, result.result) ? "Página de read_file omitida: use um caminho relativo menor para manter os argumentos no contexto." : excerpt(result.result)}` });
             } else {
                 messages.push({ role: "assistant", content: [{ type: "tool-call", toolCallId: part.id, toolName: part.name, input: part.args }] });
-                messages.push({ role: "tool", content: [{ type: "tool-result", toolCallId: part.id, toolName: part.name, output: { type: "text", value: excerpt(result.result) } }] });
+                messages.push({ role: "tool", content: [{ type: "tool-result", toolCallId: part.id, toolName: part.name, output: { type: "text", value: excerptToolResult(part.name, result.result) } }] });
             }
         }
     }
@@ -67,6 +85,9 @@ export function fitContextWindow(input: readonly ModelMessage[], tokenLimit = DE
             }
             const next = parsed[i + 1];
             const results = next?.role === "tool" ? next.content.filter(p => p.type === "tool-result").map(result => {
+                const serialized = result.output.type === "text" ? result.output.value
+                    : result.output.type === "json" ? JSON.stringify(result.output.value) : undefined;
+                if (serialized !== undefined && isReadFilePage(result.toolName, serialized)) return result;
                 if (result.output.type === "text") return { ...result, output: { ...result.output, value: excerpt(result.output.value) } };
                 if (result.output.type === "json" && JSON.stringify(result.output.value).length > 4_000) {
                     return { ...result, output: { type: "text" as const, value: excerpt(JSON.stringify(result.output.value)) } };

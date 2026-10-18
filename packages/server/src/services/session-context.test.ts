@@ -1,5 +1,9 @@
 import { expect, mock, test } from "bun:test";
 import type { ModelMessage } from "ai";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { createReadFileTool } from "../tools/read-file";
+import { execute, withFixture } from "../test-support";
 import { CONTEXT_OMISSION_NOTE, contextFromMessages, DEFAULT_CONTEXT_TOKEN_LIMIT, estimateContextTokens,
     fitContextWindow, persistSessionContext, refreshSessionContext } from "./session-context";
 
@@ -94,4 +98,67 @@ test("refresh reads a bounded recent history and reuses the persisted session li
     expect(findMany.mock.calls[0]).toMatchObject([{ where: { sessionId: "s" }, take: 81 }]);
     expect(saved.tokenLimit).toBe(1_024);
     expect(saved.estimatedTokens).toBe(estimateContextTokens([{ role: "user", content: "newest" }]));
+});
+
+
+for (const encoding of ["json", "text"] as const) {
+    test(`read_file pages reach the next model step intact as ${encoding}`, () => {
+        const page = { path: "a", content: Array.from({ length: 75 }, (_, i) => `${i + 1}: ${"x".repeat(80)}`).join("\n"),
+            totalLines: 100, truncated: true, nextOffset: 75, continuation: "Continue com offset=75 e limit=75." };
+        const output = encoding === "json" ? { type: "json" as const, value: page } : { type: "text" as const, value: JSON.stringify(page) };
+        const messages: ModelMessage[] = [
+            { role: "user", content: "inspect" },
+            { role: "assistant", content: [{ type: "tool-call", toolCallId: "page", toolName: "read_file", input: { path: "a" } }] },
+            { role: "tool", content: [{ type: "tool-result", toolCallId: "page", toolName: "read_file", output }] },
+        ];
+        const window = fitContextWindow(messages);
+        expect(window.messages.at(-1)).toEqual(messages.at(-1));
+        expect(window.truncated).toBe(false);
+        expect(window.estimatedTokens).toBeLessThanOrEqual(DEFAULT_CONTEXT_TOKEN_LIMIT);
+        const small = fitContextWindow(messages, 512);
+        expect(small.messages).toEqual([{ role: "user", content: "inspect" }, { role: "assistant", content: CONTEXT_OMISSION_NOTE }]);
+        expect(small.truncated).toBe(true);
+    });
+}
+
+test("persisted read_file pages survive reload without middle excerpts", () => {
+    const page = { path: "a", content: "line\n".repeat(1_500), totalLines: 2_000, truncated: true, nextOffset: 1_500 };
+    const serialized = JSON.stringify(page);
+    const messages = contextFromMessages([{ role: "USER", status: "COMPLETE", content: "inspect" }, {
+        role: "ASSISTANT", status: "COMPLETE", content: "", parts: [
+            { type: "tool-call", id: "page", name: "read_file", args: { path: "a" } },
+            { type: "tool-result", id: "page", name: "read_file", result: serialized },
+        ],
+    }]);
+    expect(fitContextWindow(messages).messages.at(-1)).toEqual({ role: "tool", content: [
+        { type: "tool-result", toolCallId: "page", toolName: "read_file", output: { type: "text", value: serialized } },
+    ] });
+});
+
+
+test("real read_file pagination reaches the model without missing middle lines", withFixture(async ({ cwd }) => {
+    await writeFile(join(cwd, "a"), Array.from({ length: 100 }, () => "x".repeat(100)).join("\r\n"));
+    const page = await execute(createReadFileTool(cwd), { path: "a" });
+    const serialized = JSON.stringify(page);
+    expect(serialized.length).toBeGreaterThan(4_000);
+    expect(page.nextOffset).toBeGreaterThan(0);
+    const result = { role: "tool" as const, content: [{ type: "tool-result" as const, toolCallId: "page", toolName: "read_file", output: { type: "text" as const, value: serialized } }] };
+    const window = fitContextWindow([
+        { role: "user", content: "inspect" },
+        { role: "assistant", content: [{ type: "tool-call", toolCallId: "page", toolName: "read_file", input: { path: "a" } }] }, result,
+    ]);
+    expect(window.messages.at(-1)).toEqual(result);
+}));
+
+test("read_file with oversized arguments omits its page instead of cutting its middle", () => {
+    const messages = contextFromMessages([{ role: "USER", status: "COMPLETE", content: "inspect" }, {
+        role: "ASSISTANT", status: "COMPLETE", content: "", parts: [
+            { type: "tool-call", id: "page", name: "read_file", args: { path: "a".repeat(9_000) } },
+            { type: "tool-result", id: "page", name: "read_file", result: JSON.stringify({ path: "a", content: "x".repeat(9_000), totalLines: 1, truncated: false }) },
+        ],
+    }]);
+    const serialized = JSON.stringify(fitContextWindow(messages).messages);
+    expect(serialized).toContain("caminho relativo menor");
+    expect(serialized).not.toContain("[conteúdo abreviado]");
+    expect(messages.some(message => message.role === "tool")).toBe(false);
 });

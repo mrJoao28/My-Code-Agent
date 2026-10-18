@@ -9,7 +9,7 @@ const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
 
 export function createReadFileTool(cwd: string) {
     return tool({
-        description: `Lê um arquivo de texto de até ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB, retornando até ${MAX_CONTENT_CHARS} caracteres. offset/limit selecionam linhas, mas não removem o limite do arquivo.`,
+        description: `Lê texto de até ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB em páginas de linhas completas, até ${MAX_CONTENT_CHARS} caracteres incluindo numeração. numbered=true por padrão: os prefixos 'N: ' não fazem parte do arquivo e não devem ser copiados para old_str. offset é 0-indexed e limit conta linhas. Se houver mais conteúdo, retorna nextOffset e instruções para continuar com offset e limit; omite apenas o final da página, sem saltar trechos. Uma linha que exceda sozinha o limite causa LINE_TOO_LONG. offset/limit não removem o limite de tamanho do arquivo.`,
         inputSchema: z.object({
             path: z.string().describe("Caminho do arquivo, relativo ao diretório de trabalho"),
             offset: z
@@ -23,9 +23,10 @@ export function createReadFileTool(cwd: string) {
                 .int()
                 .positive()
                 .optional()
-                .describe("Número máximo de linhas a retornar")
+                .describe("Número máximo de linhas a retornar"),
+            numbered: z.boolean().default(true).optional().describe("Inclui numeração absoluta das linhas, começando em 1. Padrão: true")
         }),
-        execute: async ({ path, offset, limit }, { abortSignal }) => {
+        execute: async ({ path, offset, limit, numbered }, { abortSignal }) => {
             abortSignal?.throwIfAborted();
             const resolvedPath = await resolveSafePath(cwd, path);
 
@@ -56,28 +57,31 @@ export function createReadFileTool(cwd: string) {
                 abortSignal?.throwIfAborted();
                 const raw = buffer.subarray(0, bytesRead).toString("utf-8");
 
-                let lines = raw.split("\n");
+                const lines = raw ? raw.split(/\r?\n/) : [];
                 const totalLines = lines.length;
-
-                if (offset != null || limit != null) {
-                    const start = offset ?? 0;
-                    const end = limit != null ? start + limit : undefined;
-                    lines = lines.slice(start, end);
+                const start = Math.min(offset ?? 0, totalLines);
+                const end = Math.min(totalLines, start + (limit ?? totalLines));
+                const selected: string[] = [];
+                let chars = 0;
+                for (let index = start; index < end; index++) {
+                    abortSignal?.throwIfAborted();
+                    const line = (numbered ?? true) ? `${index + 1}: ${lines[index]!}` : lines[index]!;
+                    const cost = line.length + (selected.length ? 1 : 0);
+                    if (chars + cost > MAX_CONTENT_CHARS) {
+                        if (!selected.length) throw new Error(`LINE_TOO_LONG: linha ${index + 1} excede o limite de ${MAX_CONTENT_CHARS} caracteres; use grep para localizar trechos menores.`);
+                        break;
+                    }
+                    selected.push(line); chars += cost;
                 }
-
-                let content = lines.join("\n");
-                let truncated = false;
-
-                if (content.length > MAX_CONTENT_CHARS) {
-                    content = content.slice(0, MAX_CONTENT_CHARS);
-                    truncated = true;
-                }
+                const nextOffset = start + selected.length < totalLines ? start + selected.length : undefined;
 
                 return {
                     path: toRelative(cwd, resolvedPath),
-                    content,
+                    content: selected.join("\n"),
                     totalLines,
-                    truncated
+                    truncated: nextOffset !== undefined,
+                    nextOffset,
+                    continuation: nextOffset === undefined ? undefined : `Continue com offset=${nextOffset} e limit=${limit ?? Math.max(1, selected.length)}.`
                 };
             } finally {
                 await handle.close();
