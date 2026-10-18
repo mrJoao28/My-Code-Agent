@@ -1,14 +1,12 @@
 import { spawn, execFile } from "node:child_process";
-import { mkdtemp, mkdir, opendir, lstat, open, rm, chmod } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { isInside, isSensitivePath, resolveSafePath } from "../utils/path";
+import { SnapshotCache, boundedSetting } from "./snapshot";
+export { snapshotWorkspace, SNAPSHOT_FILE_LIMIT } from "./snapshot";
+const snapshots = new SnapshotCache();
 
 export type CommandResult = { stdout: string; stderr: string; exitCode: number; timedOut: boolean; truncated: boolean };
 const OUTPUT_LIMIT = 20_000;
 export const DEFAULT_SANDBOX_IMAGE = "oven/bun:1.3.13";
-export const SNAPSHOT_FILE_LIMIT = 5 * 1024 * 1024;
 let dockerAvailable = false;
 export function setDockerAvailable(available: boolean) { dockerAvailable = available; }
 export function isDockerAvailable() { return dockerAvailable; }
@@ -39,54 +37,13 @@ export async function ensureSandboxImage(image: string, signal?: AbortSignal, ru
     if (result.exitCode !== 0 || result.timedOut) throw new Error("Não foi possível baixar a imagem da sandbox. Confira a conexão de rede e o nome da imagem; não há execução no host.");
 }
 
-export async function snapshotWorkspace(cwd: string, destination: string, signal?: AbortSignal): Promise<void> {
-    let bytes = 0, files = 0;
-    const visit = async (source: string, target: string) => {
-        signal?.throwIfAborted();
-        await mkdir(target, { recursive: true, mode: 0o755 });
-        await chmod(target, 0o755);
-        for await (const entry of await opendir(source)) {
-            signal?.throwIfAborted();
-            if (isSensitivePath(entry.name) || ["node_modules", "dist", ".dist", "build", "out", "target", ".next", ".nuxt", ".cache", ".turbo", "coverage"].includes(entry.name)) continue;
-            if (++files > 20_000) throw new Error("Workspace excede o limite de arquivos da sandbox.");
-            if (entry.isSymbolicLink()) continue;
-            const safe = await resolveSafePath(cwd, join(source, entry.name));
-            const info = await lstat(safe);
-            if (info.isDirectory()) await visit(safe, join(target, entry.name));
-            else if (info.isFile()) {
-                if (info.size > SNAPSHOT_FILE_LIMIT) continue;
-                const copied = join(target, entry.name);
-                const input = await open(safe, "r");
-                let output: Awaited<ReturnType<typeof open>> | undefined;
-                try {
-                    output = await open(copied, "wx", 0o600);
-                    const buffer = Buffer.alloc(64 * 1024);
-                    let fileBytes = 0;
-                    for (;;) {
-                        signal?.throwIfAborted();
-                        const { bytesRead } = await input.read(buffer, 0, buffer.length, null);
-                        if (!bytesRead) break;
-                        bytes += bytesRead; fileBytes += bytesRead;
-                        if (bytes > 200 * 1024 * 1024 || fileBytes > SNAPSHOT_FILE_LIMIT) throw new Error("Snapshot excede os limites de leitura da sandbox.");
-                        let written = 0;
-                        while (written < bytesRead) written += (await output.write(buffer, written, bytesRead - written)).bytesWritten;
-                    }
-                } finally { await input.close(); await output?.close(); }
-                await chmod(copied, info.mode & 0o111 ? 0o755 : 0o644);
-            }
-        }
-    };
-    if (isInside(resolve(cwd), resolve(destination))) throw new Error("Snapshot deve ficar fora do workspace.");
-    await visit(cwd, destination);
-}
-
 export function dockerArguments(snapshot: string, name: string, image: string, command: string): string[] {
     if (!image || image.startsWith("-") || /[\s,]/.test(image)) throw new Error("Imagem de sandbox inválida.");
     if (snapshot.includes(",")) throw new Error("Diretório temporário não pode conter vírgulas.");
     return ["run", "--rm", "--pull=never", "--name", name, "--init", "--network=none",
         "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=128",
         "--memory=512m", "--memory-swap=512m", "--cpus=1", "--no-healthcheck",
-        "--user=65534:65534", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
+        "--user=65534:65534", "--tmpfs", `/tmp:rw,nosuid,nodev,size=${boundedSetting("MYAGENT_SANDBOX_TMPFS_MIB", 64, 4096)}m,mode=1777`,
         "--mount", `type=bind,source=${snapshot},target=/workspace,readonly`, "--workdir=/workspace",
         "--entrypoint=/bin/sh", image, "-c", command];
 }
@@ -129,17 +86,18 @@ export async function runProcess(executable: string, args: string[], options: {
 function removeContainer(name: string): Promise<void> {
     return new Promise(done => { execFile("docker", ["rm", "--force", name], { timeout: 10_000, windowsHide: true }, () => done()); });
 }
-export async function runSandboxCommand(cwd: string, command: string, timeoutMs: number, signal?: AbortSignal): Promise<CommandResult> {
+export async function runSandboxCommand(cwd: string, command: string, timeoutMs: number, signal?: AbortSignal, sessionId?: string): Promise<CommandResult> {
     if (!dockerAvailable) throw new Error("Docker indisponível: comandos desativados. Não há fallback para shell do host.");
     const image = sandboxImage();
     await ensureSandboxImage(image, signal);
-    const directory = await mkdtemp(join(tmpdir(), "myagent-sandbox-"));
+    const cache = sessionId ? snapshots : new SnapshotCache();
+    const lease = await cache.acquire(cwd, sessionId ?? randomUUID(), signal);
     const name = `myagent-${randomUUID()}`;
     try {
-        await snapshotWorkspace(cwd, directory, signal);
-        return await runProcess("docker", dockerArguments(directory, name, image, command), { timeoutMs, signal, onStop: () => removeContainer(name) });
+        return await runProcess("docker", dockerArguments(lease.directory, name, image, command), { timeoutMs, signal, onStop: () => removeContainer(name) });
     } finally {
         await removeContainer(name);
-        await rm(directory, { recursive: true, force: true });
+        lease.release();
+        if (!sessionId) await cache.dispose();
     }
 }

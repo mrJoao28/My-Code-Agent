@@ -5,7 +5,7 @@ import { z } from "zod";
 import { execute, withFixture } from "../test-support";
 import { createTestRunTool } from "./test-run";
 import { createTools } from "./index";
-import { toolDecision, ApprovalManager, type ApprovalEvent } from "../security/permissions";
+import { toolDecision } from "../security/permissions";
 import { secureTools } from "../security/tool-policy";
 import type { CommandResult } from "../security/sandbox";
 
@@ -15,7 +15,7 @@ test.each(["PLAN", "BUILD"] as const)("new tools have schemas and explicit %s pe
     const tools = createTools("/fixture", mode, "fixture", { sandboxAvailable: true });
     for (const name of names) {
         expect(name in tools).toBe(true);
-        expect(toolDecision(name, mode)).toBe(name === "test_run" ? "approve" : "allow");
+        expect(toolDecision(name, mode, true)).toBe("allow");
     }
     const runnerSchema = tools.test_run!.inputSchema as z.ZodType;
     expect(runnerSchema.safeParse({ runner: "sh" }).success).toBe(false);
@@ -33,7 +33,8 @@ test("test_run quotes paths and executes only the fixed sandbox runner on a disp
     expect(result.status).toBe("passed"); expect(result.exitCode).toBe(0);
     const args = run.mock.calls[0]!;
     expect(args[0]).toBe(cwd); expect(args[2]).toBe(2_000);
-    expect(args[1]).toContain('cp -R /workspace/. "$testdir/"');
+    expect(args[1]).toContain('copy_tree /workspace "$testdir"');
+    expect(args[1]).toContain('ln -s "$item" "$2/$name"');
     expect(args[1]).toContain("mktemp -d /tmp/myagent-tests.");
     expect(args[1]).toContain("'bun' 'test'"); expect(args[1]).toContain("'\\''");
     expect(args[1]).not.toMatch(/npm|npx|install/);
@@ -62,16 +63,14 @@ test("test_run fails closed without a sandbox and rejects traversal before execu
     finally { if (previous === undefined) delete process.env.MYAGENT_SANDBOX_IMAGE; else process.env.MYAGENT_SANDBOX_IMAGE = previous; }
 }));
 
-test("test_run in PLAN waits for approval and denial never invokes the sandbox", withFixture(async ({ cwd }) => {
-    const manager = new ApprovalManager(), run = mock(async () => successful); let event: ApprovalEvent | undefined;
-    const tools = secureTools({ test_run: createTestRunTool(cwd, run) }, cwd, "PLAN", "s", { manager, authorize: async () => cwd, notify: async value => { event = value; } });
-    const pending = execute(tools.test_run, {});
-    while (!event) await Bun.sleep(1);
-    expect(run).not.toHaveBeenCalled(); manager.decide("s", event.approvalId, false);
-    await expect(pending).rejects.toThrow(); expect(run).not.toHaveBeenCalled();
-    event = undefined;
-    const approved = execute(tools.test_run, {});
-    while (!event) await Bun.sleep(1);
-    manager.decide("s", (event as ApprovalEvent).approvalId, true);
-    expect((await approved).status).toBe("passed"); expect(run).toHaveBeenCalledTimes(1);
+test("test_run in PLAN runs without approval only with sandbox and workspace authorization", withFixture(async ({ cwd }) => {
+    const run = mock(async () => successful), notify = mock(async () => {});
+    const tools = secureTools({ test_run: createTestRunTool(cwd, run) }, cwd, "PLAN", "s", { sandboxAvailable: true, authorize: async () => cwd, notify });
+    expect((await execute(tools.test_run, {})).status).toBe("passed");
+    expect(run).toHaveBeenCalledTimes(1); expect(notify).not.toHaveBeenCalled();
+    const blocked = secureTools({ test_run: createTestRunTool(cwd, run) }, cwd, "PLAN", "s", { sandboxAvailable: false, authorize: async () => cwd });
+    await expect(execute(blocked.test_run, {})).rejects.toThrow();
+    const revoked = secureTools({ test_run: createTestRunTool(cwd, run) }, cwd, "PLAN", "s", { sandboxAvailable: true, authorize: async () => { throw new Error("revoked"); } });
+    await expect(execute(revoked.test_run, {})).rejects.toThrow("revoked");
+    expect(run).toHaveBeenCalledTimes(1);
 }));

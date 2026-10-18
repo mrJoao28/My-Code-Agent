@@ -13,7 +13,16 @@ describe("Tool permissions", () => {
     test("classifies known tools and denies unknown tools by default", () => {
         expect(toolDecision("read_file", "PLAN")).toBe("allow");
         expect(toolDecision("bash", "PLAN")).toBe("deny");
-        expect(toolDecision("bash", "BUILD")).toBe("approve");
+        for (const name of ["bash", "type_check", "test_run"]) {
+            expect(toolDecision(name, "BUILD", true)).toBe("allow");
+            expect(toolDecision(name, "BUILD", false)).toBe("deny");
+        }
+        expect(toolDecision("bash", "PLAN", true)).toBe("deny");
+        expect(toolDecision("type_check", "PLAN", true)).toBe("allow");
+        expect(toolDecision("test_run", "PLAN", true)).toBe("allow");
+        for (const name of ["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "git_commit", "web_search", "web_fetch"]) {
+            expect(toolDecision(name, "BUILD", true)).toBe("approve");
+        }
         expect(toolDecision("web_fetch", "PLAN")).toBe("approve");
         expect(toolDecision("unknown", "BUILD")).toBe("deny");
     });

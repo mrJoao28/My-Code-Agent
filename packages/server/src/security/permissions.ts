@@ -32,10 +32,12 @@ export class ApprovalManager {
 }
 export const approvals = new ApprovalManager();
 const READ_TOOLS = new Set(["read_file", "read_files", "project_inspect", "file_outline", "environment_check", "symbol_search", "test_discover", "git_show", "git_blame", "diff_summary", "list_directory", "glob", "grep", "git_status", "git_diff", "git_log", "todo_write"]);
-const APPROVAL_TOOLS = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "bash", "git_commit", "type_check", "test_run", "web_search", "web_fetch"]);
+const APPROVAL_TOOLS = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "git_commit", "web_search", "web_fetch"]);
 const BUILD_TOOLS = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "bash", "git_commit"]);
-export function toolDecision(name: string, mode: "PLAN" | "BUILD"): "allow" | "approve" | "deny" {
+const SANDBOX_TOOLS = new Set(["bash", "type_check", "test_run"]);
+export function toolDecision(name: string, mode: "PLAN" | "BUILD", sandboxAvailable = false): "allow" | "approve" | "deny" {
     if (mode === "PLAN" && BUILD_TOOLS.has(name)) return "deny";
+    if (SANDBOX_TOOLS.has(name)) return sandboxAvailable ? "allow" : "deny";
     if (READ_TOOLS.has(name)) return "allow";
     return APPROVAL_TOOLS.has(name) ? "approve" : "deny";
 }

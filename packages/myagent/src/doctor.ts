@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import { checkDocker, imagePresent, sandboxImage } from "../../server/src/security/sandbox";
 import { getAllModels, getModelApiKeyEnv } from "../../server/src/lib/model-registry";
 
+import { detectedTools, missingImageTools } from "./doctor-tools";
+
 export async function doctor() {
     console.log(`Bun: ${Bun.version} (requer >= 1.3.13)`);
     if (Bun.semver.order(Bun.version, "1.3.13") < 0) { console.log("Atualize o Bun em https://bun.sh."); process.exitCode = 1; }
@@ -26,7 +28,16 @@ export async function doctor() {
     console.log(docker ? "Docker: ativo." : "Docker indisponível: comandos desativados. O aplicativo continua disponível.");
     const image = sandboxImage();
     if (docker) {
-        try { console.log(await imagePresent(image) ? `Imagem ${image}: presente.` : `Imagem ${image}: ausente; será baixada na primeira execução aprovada.`); }
+        try {
+            if (await imagePresent(image)) {
+                console.log(`Imagem ${image}: presente.`);
+                const detected = await detectedTools(process.cwd());
+                console.log(`Ferramentas do projeto: ${detected.join(", ") || "nenhuma detectada"}.`);
+                const missing = await missingImageTools(image, detected);
+                if (missing.length) console.log(`Aviso: faltam na imagem: ${missing.join(", ")}. Prepare uma imagem compatível; CLIs locais podem ser usadas com MYAGENT_SANDBOX_DEPENDENCIES=1, mas runtimes precisam existir na imagem.`);
+                else console.log("Ferramentas detectadas: presentes na imagem.");
+            } else console.log(`Imagem ${image}: ausente; será baixada na primeira execução. Ferramentas do projeto ainda não verificadas.`);
+        }
         catch { console.log(`Imagem ${image}: não foi possível verificar.`); }
     } else console.log(`Imagem ${image}: verificação adiada até o Docker estar ativo.`);
     console.log("Configuração de modelos (valores das chaves são omitidos):");

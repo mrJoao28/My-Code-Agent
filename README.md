@@ -16,7 +16,7 @@ myagent
 
 O pacote usa `#!/usr/bin/env bun`; npm instala o comando, mas não instala o runtime Bun. No Windows, o npm cria o shim `myagent.cmd`. A pasta de executáveis globais do npm precisa estar no PATH.
 
-**Docker é opcional para abrir o aplicativo.** Sem Docker ativo, a interface avisa que os comandos estão desativados. Shell, typecheck e execução de testes exigem Docker, aprovação e sandbox; não existe fallback no host.
+**Docker é opcional para abrir o aplicativo.** Sem Docker ativo, a interface avisa que os comandos estão desativados. Shell, typecheck e execução de testes exigem Docker e sandbox, sem aprovação por chamada. Shell continua indisponível em PLAN; alterações no projeto e rede exigem aprovação. Não existe fallback no host.
 
 ## Comandos
 
@@ -26,7 +26,7 @@ O pacote usa `#!/usr/bin/env bun`; npm instala o comando, mas não instala o run
 | `myagent --new` | Cria outra sessão na mesma pasta |
 | `myagent resume` | Escolhe uma sessão da pasta; permite listar todas |
 | `myagent resume --all` | Lista sessões de todas as pastas para escolha |
-| `myagent doctor` | Verifica Bun, diretório global, SQLite, Docker, imagem e nomes das chaves necessárias |
+| `myagent doctor` | Verifica Bun, diretório global, SQLite, Docker, imagem, ferramentas do projeto e nomes das chaves necessárias |
 | `myagent --version` | Exibe a versão |
 | `myagent --help` | Exibe a ajuda |
 
@@ -47,7 +47,9 @@ Tudo fica em `~/.myagent/`, com override por `MYAGENT_HOME`:
 
 `DATABASE_URL` e PostgreSQL não são necessários. Variáveis do ambiente têm precedência sobre `config.env`. Consulte `.env.example` para nomes públicos; nunca versione chaves. No Windows, proteja o diretório global pelas ACLs do perfil do usuário.
 
-A imagem padrão da sandbox é `oven/bun:1.3.13`, configurável por `MYAGENT_SANDBOX_IMAGE`. O aplicativo faz pull somente na primeira execução aprovada que precisar da imagem. Ela contém Bun; compiladores e dependências específicos do projeto podem exigir uma imagem personalizada. O container roda sem rede, com snapshot filtrado somente leitura e arquivos temporários em `/tmp`.
+A imagem padrão da sandbox é `oven/bun:1.3.13`, configurável por `MYAGENT_SANDBOX_IMAGE`. O aplicativo faz pull somente na primeira execução que precisar da imagem. Ela contém Bun; compiladores e dependências específicos do projeto podem exigir uma imagem personalizada. O container roda sem rede, com snapshot filtrado somente leitura reaproveitado por sessão e arquivos temporários em `/tmp`.
+
+Para usar dependências já instaladas, defina `MYAGENT_SANDBOX_DEPENDENCIES=1` no ambiente. A cópia filtrada de `node_modules` e `.venv` permanece somente leitura e tem limite padrão de 512 MiB, ajustável por `MYAGENT_SANDBOX_DEPENDENCY_MIB`. Links externos são omitidos e dependências precisam ser compatíveis com Linux. `MYAGENT_SANDBOX_TMPFS_MIB` ajusta o espaço temporário (padrão 64 MiB). Veja [segurança e testes](docs/SEGURANCA_E_TESTES.md) para os limites e o tratamento de `.bin`.
 
 ## Desenvolvimento
 

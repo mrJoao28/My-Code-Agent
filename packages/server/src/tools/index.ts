@@ -39,7 +39,7 @@ export function createTools(cwd: string, mode: Mode, sessionId: string, security
         file_outline: createFileOutlineTool(cwd),
         environment_check: createEnvironmentCheckTool(cwd),
         symbol_search: createSymbolSearchTool(cwd),
-        ...(processesEnabled && { test_run: createTestRunTool(cwd) }),
+        ...(processesEnabled && { test_run: createTestRunTool(cwd, undefined, sessionId) }),
         test_discover: createTestDiscoverTool(cwd),
         git_show: createGitShowTool(cwd),
         git_blame: createGitBlameTool(cwd),
@@ -53,7 +53,7 @@ export function createTools(cwd: string, mode: Mode, sessionId: string, security
         git_status: createGitStatusTool(cwd),
         git_diff: createGitDiffTool(cwd),
         git_log: createGitLogTool(cwd),
-        ...(processesEnabled && { type_check: createTypeCheckTool(cwd) }),
+        ...(processesEnabled && { type_check: createTypeCheckTool(cwd, sessionId) }),
         todo_write: createTodoWriteTool(sessionId)
     };
 
@@ -68,7 +68,7 @@ export function createTools(cwd: string, mode: Mode, sessionId: string, security
         delete_file: createDeleteFileTool(cwd),
         move_file: createMoveFileTool(cwd),
         apply_patch: createApplyPatchTool(cwd),
-        ...(processesEnabled && { bash: createBashTool(cwd) }),
+        ...(processesEnabled && { bash: createBashTool(cwd, sessionId) }),
         git_commit: createGitCommitTool(cwd)
     }, instructions), cwd, mode, sessionId, security);
 }

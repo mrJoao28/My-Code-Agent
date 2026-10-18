@@ -106,7 +106,10 @@ typecheck aprovado só porque `bun test` passou.
   host não é sandbox contra outro processo trocando arquivos durante operações.
 - Shell, type_check e test_run só executam na sandbox Docker configurada, sem rede e com
   snapshot filtrado somente leitura. Não reintroduza fallback de execução no host.
-  A política central exige aprovação antes de efeitos colaterais e rede.
+  Com Docker disponível, bash em BUILD, type_check e test_run dispensam aprovação.
+  Escritas no projeto, commits e ferramentas de rede continuam exigindo aprovação.
+  Dependências locais só são copiadas com MYAGENT_SANDBOX_DEPENDENCIES=1,
+  filtradas e somente leitura; snapshots são reaproveitados por sessão.
 - A API local usa token privado, rejeita clientes de navegador e limita workspaces.
   Preserve esses controles em novas rotas. Veja `docs/SEGURANCA_E_TESTES.md`.
 - Propague cancelamento para processos e rede. Libere timers, listeners e locks

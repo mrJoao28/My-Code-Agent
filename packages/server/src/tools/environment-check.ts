@@ -11,7 +11,7 @@ export function createEnvironmentCheckTool(cwd: string) {
             const configured = Boolean(process.env.MYAGENT_SANDBOX_IMAGE);
             return { server: { platform: process.platform, arch: process.arch, bun: Bun.version, nodeCompatibility: process.versions.node },
                 workspaceAccessible: true, sandbox: { configured, verified: false, network: false, hostExecution: false,
-                    dependenciesVerified: false, nextStep: configured ? "Execute uma verificação aprovada na sandbox; runtime do servidor não comprova runtime da imagem." : "Configure MYAGENT_SANDBOX_IMAGE com imagem local de confiança antes de executar processos." } };
+                    dependenciesVerified: false, nextStep: configured ? "Execute uma verificação na sandbox; runtime do servidor não comprova runtime da imagem." : "Configure MYAGENT_SANDBOX_IMAGE com imagem local de confiança antes de executar processos." } };
         },
     });
 }

@@ -1,8 +1,8 @@
 # Ferramentas de inspeção e testes
 
-As dez ferramentas são registradas pelo backend em PLAN e BUILD. Nove fazem
-leitura/diagnóstico; `test_run` executa código e exige aprovação explícita em
-ambos os modos. PLAN não ganha escrita no projeto. Todas passam pela autorização
+As ferramentas são registradas pelo backend em PLAN e BUILD. Nove fazem
+leitura/diagnóstico; `test_run` executa código na sandbox Docker sem aprovação
+por chamada e só é oferecido com Docker disponível. PLAN não ganha escrita no projeto. Todas passam pela autorização
 do workspace e pelo orçamento de chamadas já existente.
 
 | Ferramenta | Escopo e limites |
@@ -28,18 +28,22 @@ podem exigir repetir a consulta com um subdiretório mais específico.
 
 `test_run` usa exclusivamente `runSandboxCommand`: Docker local confiável,
 snapshot filtrado somente leitura, sem rede/credenciais, com cópia descartável
-em `/tmp` (tmpfs de 64 MiB). Essa cópia permite artefatos temporários sem mudar o
+em `/tmp` (tmpfs padrão de 64 MiB, configurável por `MYAGENT_SANDBOX_TMPFS_MIB`). Essa cópia permite artefatos temporários sem mudar o
 workspace original; projetos maiores podem não caber. Não há instalação de
 pacotes, `npx`, scripts arbitrários de package.json ou fallback para o host.
-Runner e dependências precisam estar disponíveis na imagem e acessíveis à cópia
-temporária; dependências locais do host são excluídas do snapshot.
+Runtimes precisam existir na imagem. Com `MYAGENT_SANDBOX_DEPENDENCIES=1`,
+dependências locais compatíveis entram no snapshot filtrado somente leitura,
+com limite de tamanho e recusa de links externos. A cópia temporária usa essas
+dependências sem duplicá-las no tmpfs nem permitir escrita nelas. Snapshots são
+reaproveitados por sessão e revalidados antes de cada comando. Detalhes em
+[segurança e testes](SEGURANCA_E_TESTES.md).
 
 Quando um processo é executado, falhas de preparação, dependência ausente ou
 teste reprovado retornam código não zero e `failed`; timeout retorna `timed_out`.
 Falhas anteriores à execução, como imagem ausente ou snapshot inválido, são
 erros da ferramenta. Cancelamento interrompe a operação. `passed` representa código zero do processo, sem inventar contagem
 ou cobertura de testes. Os testes automatizados simulam a execução da sandbox;
-a execução real requer imagem local configurada e aprovação na aplicação.
+há também integração real com imagem Bun local configurada, sem aprovação na aplicação.
 
 Git usa o executor protegido existente, sem textconv/diff externo. `git_show`
 não cobre arquivos antigos que já saíram do índice atual. `git_blame` recusa

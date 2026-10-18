@@ -1,3 +1,4 @@
+import { isDockerAvailable } from "./sandbox";
 import type { ToolSet } from "ai";
 import { toolCallArgsSchema } from "@myagent/shared";
 import { approvals, PermissionDeniedError, toolDecision, type ApprovalEvent, type ApprovalManager } from "./permissions";
@@ -17,7 +18,7 @@ export function secureTools<T extends ToolSet>(tools: T, cwd: string, mode: "PLA
         if (!execute) throw new PermissionDeniedError("Ferramenta sem executor: " + name);
         secured[name] = { ...definition, execute: async (input, options) => {
             const args = toolCallArgsSchema.parse(structuredClone(input));
-            const decision = toolDecision(name, mode);
+            const decision = toolDecision(name, mode, security.sandboxAvailable ?? isDockerAvailable());
             if (decision === "deny") throw new PermissionDeniedError("Ferramenta não permitida: " + name);
             options.abortSignal?.throwIfAborted();
             await (security.authorize ?? authorizeWorkspace)(cwd);
