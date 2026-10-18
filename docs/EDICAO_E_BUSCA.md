@@ -19,10 +19,11 @@ conta linhas. A saída usa LF e contém somente linhas completas, até 10 mil
 caracteres incluindo os prefixos. Quando há mais linhas, `truncated` é verdadeiro
 e `nextOffset` indica o próximo `offset`; `continuation` sugere também um `limit`.
 Somente o final é omitido, sem inserir trechos do fim do arquivo no meio da página.
-Páginas válidas de `read_file` também permanecem inteiras no contexto enviado ao
-modelo e ao recarregar mensagens persistidas. O limite global da janela continua
-valendo: quando necessário, são omitidos pares completos de chamada/resultado,
-com aviso, em vez de juntar o começo e o fim da página.
+Páginas válidas de `read_file` permanecem inteiras no contexto enviado ao modelo
+e ao recarregar mensagens persistidas enquanto houver orçamento. Quando faltar
+espaço, o contexto pode encurtar a página somente no fim, em linhas completas,
+atualizando `nextOffset` e a instrução de continuação; janelas muito pequenas
+podem omitir pares completos, com aviso. Veja [a política de contexto](CONTEXTO_DO_MODELO.md).
 Uma linha que sozinha ultrapasse o limite produz `LINE_TOO_LONG`; use `grep` para
 localizar trechos menores. O limite de 5 MiB do arquivo continua valendo.
 

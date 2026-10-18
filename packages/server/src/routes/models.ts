@@ -16,6 +16,7 @@ const addModelSchema = z.object({
   id: z.string().trim().min(1).max(200),
   provider: providerSchema,
   token: z.string().trim().optional(),
+  contextWindow: z.number().int().min(1_024).max(2_147_483_647).optional(),
 });
 const configureModelSchema = z.object({ token: z.string().trim().min(1) });
 
@@ -29,7 +30,7 @@ const app = new Hono()
     ),
   )
   .post("/", zValidator("json", addModelSchema), async (c) => {
-    const { id, provider, token } = c.req.valid("json");
+    const { id, provider, token, contextWindow } = c.req.valid("json");
 
     if (findModel(id)) {
       return c.json({ error: `Model already exists: ${id}` }, 409);
@@ -48,6 +49,7 @@ const app = new Hono()
         id,
         provider: provider as SupportedProvider,
         apiKeyEnv: envKey,
+        contextWindow,
       });
 
       return c.json({
@@ -55,6 +57,7 @@ const app = new Hono()
           id: model.id,
           provider: model.provider,
           pricing: model.pricing,
+          contextWindow: model.contextWindow,
           configured: isModelConfigured(model.id),
         },
       }, 201);

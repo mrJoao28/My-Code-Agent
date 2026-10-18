@@ -3,6 +3,99 @@ import { streamAIResponse, cancelAllGenerations, type StreamDependencies, type S
 import { streamText } from "ai";
 import { MockLanguageModelV3, convertArrayToReadableStream } from "ai/test";
 import { getSessionTodos, clearSessionTodos } from "../tools/todo-write";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { withFixture } from "../test-support";
+import { contextBudget, fitContextWindow, persistSessionContext } from "./session-context";
+
+test("real SDK completes 30 successive reads with every middle line visible and full results persisted", withFixture(async ({ cwd }) => {
+    const fixture = setup([]);
+    fixture.params.cwd = cwd;
+    fixture.params.history = [{ role: "user", content: "Leia os 30 arquivos" }];
+    const content = Array.from({ length: 300 }, (_, i) => `linha-${i} ${"x".repeat(16)}`).join("\r\n");
+    await Promise.all(Array.from({ length: 30 }, (_, i) => writeFile(join(cwd, `${i}.ts`), content)));
+    const previousRoots = process.env.MYAGENT_WORKSPACE_ROOTS;
+    process.env.MYAGENT_WORKSPACE_ROOTS = JSON.stringify([cwd]);
+    let step = 0;
+    const snapshots: unknown[] = [];
+    const db = { sessionContext: {
+        findUnique: async () => ({ tokenLimit: 16_384 }),
+        upsert: async ({ create }: { create: Record<string, unknown> }) => { snapshots.push(create); return create; },
+    } } as unknown as Parameters<typeof persistSessionContext>[0];
+    const dependencies: Partial<StreamDependencies> = { ...fixture.dependencies, db: { ...fixture.dependencies.db, ...db } };
+    delete dependencies.saveContext;
+    const provider = new MockLanguageModelV3({ doStream: async options => {
+        const prompt = JSON.stringify(options.prompt);
+        if (step > 0) {
+            expect(prompt.match(/151: linha-150/g)).toHaveLength(step);
+            expect(prompt.match(/300: linha-299/g)).toHaveLength(step);
+        }
+        const final = step === 30;
+        return { stream: convertArrayToReadableStream([
+            { type: "stream-start" as const, warnings: [] },
+            ...(final ? [
+                { type: "text-start" as const, id: "answer" },
+                { type: "text-delta" as const, id: "answer", delta: "30 arquivos lidos" },
+                { type: "text-end" as const, id: "answer" },
+            ] : [{ type: "tool-call" as const, toolCallId: `read-${step}`, toolName: "read_file", input: JSON.stringify({ path: `${step++}.ts` }) }]),
+            { type: "finish" as const, finishReason: { unified: final ? "stop" as const : "tool-calls" as const, raw: undefined },
+                usage: { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } } },
+        ]) };
+    } });
+    fixture.dependencies.generate = streamText;
+    fixture.dependencies.resolveModel = () => ({ model: provider, provider: "ollama", modelId: "fixture", contextWindow: 200_000 });
+    try {
+        await streamAIResponse(fixture.stream, fixture.params, { ...dependencies, generate: streamText, resolveModel: fixture.dependencies.resolveModel });
+        expect(provider.doStreamCalls).toHaveLength(31);
+        expect(snapshots).toHaveLength(31);
+        for (const snapshot of snapshots as { tokenLimit: number }[]) {
+            expect(snapshot.tokenLimit).toBeGreaterThan(16_384);
+            expect(snapshot.tokenLimit).toBeLessThan(contextBudget(200_000).tokenLimit);
+        }
+        expect(fixture.params.abortController.signal.aborted).toBe(false);
+        expect(fixture.events.at(-1)?.event).toBe("done");
+        expect(fixture.created[0]?.status).toBe("COMPLETE");
+        const results = (fixture.created[0]?.parts as { type: string; result?: string }[]).filter(p => p.type === "tool-result");
+        expect(results).toHaveLength(30);
+        for (const result of results) {
+            const page = JSON.parse(result.result!);
+            expect(page.content).toContain("151: linha-150");
+            expect(page.content).toContain("300: linha-299");
+        }
+    } finally {
+        if (previousRoots === undefined) delete process.env.MYAGENT_WORKSPACE_ROOTS;
+        else process.env.MYAGENT_WORKSPACE_ROOTS = previousRoots;
+    }
+}), 30_000);
+
+test("real SDK receives the first duplicate as a tool error and can recover without aborting", async () => {
+    const fixture = setup([]);
+    fixture.params.cwd = process.cwd();
+    fixture.params.history = [{ role: "user", content: "leia" }];
+    fixture.dependencies.saveContext = async messages => fitContextWindow(messages, 100_000).messages;
+    let step = 0;
+    const provider = new MockLanguageModelV3({ doStream: async options => {
+        const final = step++ === 2;
+        if (final) expect(JSON.stringify(options.prompt)).toContain("já foi obtido");
+        return { stream: convertArrayToReadableStream([
+            { type: "stream-start" as const, warnings: [] },
+            ...(final ? [
+                { type: "text-start" as const, id: "answer" },
+                { type: "text-delta" as const, id: "answer", delta: "Usei a primeira leitura" },
+                { type: "text-end" as const, id: "answer" },
+            ] : [{ type: "tool-call" as const, toolCallId: `duplicate-${step}`, toolName: "read_file", input: '{"path":"AGENTS.md"}' }]),
+            { type: "finish" as const, finishReason: { unified: final ? "stop" as const : "tool-calls" as const, raw: undefined },
+                usage: { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } } },
+        ]) };
+    } });
+    fixture.dependencies.generate = streamText;
+    fixture.dependencies.resolveModel = () => ({ model: provider, provider: "ollama", modelId: "fixture", contextWindow: 200_000 });
+    await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+    expect(provider.doStreamCalls).toHaveLength(3);
+    expect(fixture.params.abortController.signal.aborted).toBe(false);
+    expect(fixture.created[0]?.status).toBe("COMPLETE");
+    expect(fixture.events.at(-1)?.event).toBe("done");
+});
 
 function setup(parts: unknown[], controller = new AbortController()) {
     const created: Record<string, unknown>[] = [], events: { event: string; data: string }[] = [];

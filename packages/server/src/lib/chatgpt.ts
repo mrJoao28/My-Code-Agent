@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { createLocalJWKSet, jwtVerify } from "jose";
 import type { JWTPayload, JSONWebKeySet } from "jose";
 import { z } from "zod";
-import type { SupportedChatModelDefinition } from "@myagent/shared";
+import { DEFAULT_MODEL_CONTEXT_WINDOW, findSupportedChatModel, type SupportedChatModelDefinition } from "@myagent/shared";
 import { ChatGPTStore } from "./chatgpt-store";
 import type { ChatGPTAccount } from "./chatgpt-store";
 import { boundedJSON } from "./bounded-json";
@@ -59,7 +59,7 @@ export class ChatGPTService {
         const state = this.store.read();
         const account = state.accounts.find(a => a.clientId === state.activeId);
         if (!account?.tokens) return [];
-        return account.models.map(m => ({ id: `chatgpt:${m.slug}`, displayName: m.name, provider: "chatgpt", pricing: { inputUsdPerMillionTokens: 0, outputUsdPerMillionTokens: 0 } }));
+        return account.models.map(m => ({ id: `chatgpt:${m.slug}`, displayName: m.name, provider: "chatgpt", contextWindow: findSupportedChatModel(m.slug)?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW, pricing: { inputUsdPerMillionTokens: 0, outputUsdPerMillionTokens: 0 } }));
     }
     activeId() { return this.store.read().activeId; }
     signal(clientId: string): AbortSignal {

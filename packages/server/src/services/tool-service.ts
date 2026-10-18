@@ -1,3 +1,4 @@
+import type { ModelMessage } from "ai";
 export { createTools } from "../tools";
 
 /** Máximo de tool calls permitidas em uma única geração. */
@@ -32,6 +33,13 @@ export class ToolLoopDetectedError extends Error {
     }
 }
 
+export class ToolResultAlreadyAvailableError extends Error {
+    constructor(toolName: string) {
+        super(`O resultado de ${toolName} com esses argumentos já foi obtido e continua no contexto. Use a evidência disponível; para outra página, altere offset e limit. Não repita a mesma chamada.`);
+        this.name = "ToolResultAlreadyAvailableError";
+    }
+}
+
 export class ToolCallGuard {
     private totalCalls = 0;
     private readonly callCounts = new Map<string, number>();
@@ -39,6 +47,39 @@ export class ToolCallGuard {
 
     get shouldSummarize(): boolean {
         return this.totalCalls >= Math.max(1, this.limit - 2);
+    }
+
+    /** O snapshot efetivamente enviado ao modelo define quais repetições são evitáveis. */
+    updateContext(messages: readonly ModelMessage[]): void {
+        const available = new Set<string>();
+        const readsByPath = new Map<string, Set<string>>();
+        for (let i = 0; i < messages.length; i++) {
+            const message = messages[i]!;
+            const resultMessage = messages[i + 1];
+            if (message.role !== "assistant" || typeof message.content === "string" || resultMessage?.role !== "tool") continue;
+            for (const call of message.content) {
+                if (call.type !== "tool-call") continue;
+                const result = resultMessage.content.find(p => p.type === "tool-result" && p.toolCallId === call.toolCallId && p.toolName === call.toolName);
+                if (!result || result.type !== "tool-result" || result.output.type.startsWith("error")) continue;
+                const text = result.output.type === "text" ? result.output.value : result.output.type === "json" ? JSON.stringify(result.output.value) : "";
+                if (/^(Tool failed:|Error:)/.test(text) || text.includes('"contextTruncated":true') || text.includes("[Resultado abreviado")) continue;
+                const args = call.input as { path?: unknown } | null;
+                const path = args && typeof args.path === "string" ? args.path : undefined;
+                if (path && ["edit_file", "write_file"].includes(call.toolName)) {
+                    // Uma leitura anterior à edição deixou de representar o arquivo atual.
+                    for (const key of readsByPath.get(path) ?? []) available.delete(key);
+                    readsByPath.delete(path);
+                }
+                const key = `${call.toolName}:${safeStableStringify(call.input)}`;
+                available.add(key);
+                if (path && call.toolName === "read_file") {
+                    const keys = readsByPath.get(path) ?? new Set<string>();
+                    keys.add(key); readsByPath.set(path, keys);
+                }
+            }
+        }
+        for (const key of this.callCounts.keys()) if (!available.has(key)) this.callCounts.delete(key);
+        for (const key of available) if (!this.callCounts.has(key)) this.callCounts.set(key, 1);
     }
 
     register(toolName: string, args: unknown): void {
@@ -54,6 +95,7 @@ export class ToolCallGuard {
                 `a mesma chamada para "${toolName}" com os mesmos argumentos se repetiu ${count} vezes — possível loop.`
             );
         }
+        if (count > 1) throw new ToolResultAlreadyAvailableError(toolName);
     }
 }
 

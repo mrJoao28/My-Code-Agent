@@ -6,6 +6,7 @@ import {
   getMaxToolCalls,
   ToolCallGuard,
   ToolLoopDetectedError,
+  ToolResultAlreadyAvailableError,
 } from "./tool-service";
 
 describe("ToolCallGuard", () => {
@@ -22,8 +23,9 @@ describe("ToolCallGuard", () => {
     const guard = new ToolCallGuard();
     const args = { path: "package.json" };
 
-    for (let i = 0; i < MAX_IDENTICAL_REPEATS; i++) {
-      guard.register("read_file", args);
+    guard.register("read_file", args);
+    for (let i = 1; i < MAX_IDENTICAL_REPEATS; i++) {
+      expect(() => guard.register("read_file", args)).toThrow(ToolResultAlreadyAvailableError);
     }
 
     expect(() => guard.register("read_file", args)).toThrow(ToolLoopDetectedError);

@@ -1,5 +1,7 @@
 export {
     SUPPORTED_CHAT_MODELS,
+    DEFAULT_MODEL_CONTEXT_WINDOW,
+    validContextWindow,
     DEFAULT_CHAT_MODEL_ID,
     findSupportedChatModel,
     type ModelPricing,

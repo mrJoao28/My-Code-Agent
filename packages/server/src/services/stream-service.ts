@@ -9,7 +9,8 @@ import { createTools, GLOBAL_GENERATION_TIMEOUT_MS, ToolCallGuard, ToolCallLimit
 import { extractFullText, serializeParts } from "./message-format";
 import { logger } from "../lib/logger";
 import type { ModelMessage } from "ai";
-import { persistSessionContext, refreshSessionContext } from "./session-context";
+import { contextBudget, persistSessionContext, refreshSessionContext } from "./session-context";
+import { findModel } from "../lib/model-registry";
 import { isDockerAvailable } from "../security/sandbox";
 
 const generations = new Set<{ controller: AbortController; done: Promise<void> }>();
@@ -55,8 +56,9 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
     const abortRequest = () => abortController.abort(params.requestSignal?.reason);
     params.requestSignal?.addEventListener("abort", abortRequest, { once: true });
     if (params.requestSignal?.aborted) abortRequest();
-    const saveContext = dependencies.saveContext ?? ((messages, signal) => persistSessionContext(db, sessionId, messages, signal));
-    const refreshContext = dependencies.refreshContext ?? (() => refreshSessionContext(db, sessionId));
+    let budget: ReturnType<typeof contextBudget> | undefined;
+    const saveContext = dependencies.saveContext ?? ((messages, signal) => persistSessionContext(db, sessionId, messages, signal, false, budget?.tokenLimit));
+    const refreshContext = dependencies.refreshContext ?? (() => refreshSessionContext(db, sessionId, undefined, budget?.tokenLimit));
     const refreshAfterPersistence = async () => {
         try { await refreshContext(); }
         catch { logger.warn({ sessionId, event: "context_refresh_failed" }, "Context will be rebuilt from persisted messages before the next generation"); }
@@ -69,7 +71,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
             if (finalToolLimitStep) throw new ToolCallLimitError(toolGuard.limit);
             try { toolGuard.register(name, input); }
             catch (error) {
-                if (!(error instanceof ToolCallLimitError)) abortController.abort(error);
+                if (error instanceof ToolLoopDetectedError) abortController.abort(error);
                 throw error;
             }
         },
@@ -137,15 +139,19 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
             ? Object.fromEntries(Object.entries(tools).map(([name, definition]) => [name, { ...definition, providerOptions: resolvedModel.toolOptions }]))
             : tools;
         abortController.signal.throwIfAborted();
+        const system = buildSystemPrompt({ cwd: cwd ?? "", mode, availableTools: Object.keys(configuredTools ?? {}), sandboxConfigured: isDockerAvailable(), maxToolCalls: toolGuard.limit });
+        budget = contextBudget(resolvedModel.contextWindow ?? findModel(model)?.contextWindow, system, configuredTools);
         const result = (dependencies.generate ?? aiStreamText)({
             model: resolvedModel.model,
-            system: buildSystemPrompt({ cwd: cwd ?? "", mode, availableTools: Object.keys(configuredTools ?? {}), sandboxConfigured: isDockerAvailable(), maxToolCalls: toolGuard.limit }),
+            system,
+            maxOutputTokens: budget.responseTokens,
             tools: configuredTools,
             stopWhen: tools ? stepCountIs(toolGuard.limit + 1) : undefined,
             messages: history,
             prepareStep: async ({ messages }) => {
                 abortController.signal.throwIfAborted();
                 const boundedMessages = await saveContext(messages, abortController.signal);
+                toolGuard.updateContext(boundedMessages);
                 if (!toolGuard.shouldSummarize) return { messages: boundedMessages };
                 if (!finalToolLimitStep) {
                     finalToolLimitStep = true;

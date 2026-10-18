@@ -4,13 +4,14 @@ import { db } from "@myagent/database";
 import { Mode, MessageStatus } from "@myagent/database";
 import type { ChatStreamEvent } from "@myagent/shared";
 import { isModelConfigured, isSupportedChatModel } from "../lib/models";
+import { findModel } from "../lib/model-registry";
 import { touchSession } from "./message-service";
 import { streamAIResponse } from "./stream-service";
 import { logger } from "../lib/logger";
 import { validateSessionWorkspace } from "../security/workspaces";
 import type { SessionLeases } from "./session-lease";
 import { markSessionUsed } from "./session-lifecycle";
-import { fitContextWindow, refreshSessionContext } from "./session-context";
+import { contextBudget, fitContextWindow, refreshSessionContext } from "./session-context";
 
 const activeResumeSessionIds = new Set<string>();
 let sessionLeases: SessionLeases | undefined;
@@ -39,7 +40,7 @@ export async function handleResume(c: Context) {
   if (!resumableMessage || resumableMessage.role !== "USER") { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session has no pending user message to resume" }, 409); }
   if (!isSupportedChatModel(resumableMessage.model)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: `Session uses unsupported model: ${resumableMessage.model}` }, 409); }
   if (!isModelConfigured(resumableMessage.model)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "MODEL_API_KEY_REQUIRED", model: resumableMessage.model }, 428); }
-  const history = await refreshSessionContext(db, sessionId, c.req.raw.signal);
+  const history = await refreshSessionContext(db, sessionId, c.req.raw.signal, contextBudget(findModel(resumableMessage.model)?.contextWindow).tokenLimit);
   const abortController = new AbortController();
     return streamSSE(c, async (stream) => {
       stream.onAbort(() => abortController.abort());
@@ -78,7 +79,7 @@ export async function handleSubmit(c: Context, data: SubmitBody) {
   activeResumeSessionIds.add(sessionId);
 
   try {
-    fitContextWindow([{ role: "user", content: data.content }]);
+    fitContextWindow([{ role: "user", content: data.content }], contextBudget(findModel(data.model)?.contextWindow).tokenLimit);
     const session = await db.session.findUnique({ where: { id: sessionId } });
     if (!session) {
       activeResumeSessionIds.delete(sessionId);
@@ -93,7 +94,7 @@ export async function handleSubmit(c: Context, data: SubmitBody) {
     // subia na listagem (ordenada por atividade recente) assim que o
     // usuário mandava uma nova mensagem. Veja touchSession em message-service.ts.
     await touchSession(sessionId);
-    const history = await refreshSessionContext(db, sessionId, c.req.raw.signal);
+    const history = await refreshSessionContext(db, sessionId, c.req.raw.signal, contextBudget(findModel(data.model)?.contextWindow).tokenLimit);
     const abortController = new AbortController();
 
     return streamSSE(c, async (stream) => {

@@ -47,5 +47,5 @@ export function resolveChatModel(modelId: string): ResolvedModel {
     throw new Error(`Missing API token for model: ${modelId}`);
   }
 
-  return resolveSupportedModel(model.provider, model.id, apiKey);
+  return { ...resolveSupportedModel(model.provider, model.id, apiKey), contextWindow: model.contextWindow };
 }
