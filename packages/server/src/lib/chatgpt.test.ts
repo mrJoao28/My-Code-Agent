@@ -9,15 +9,16 @@ import { ChatGPTStore } from "./chatgpt-store";
 import { boundedJSON } from "./bounded-json";
 import { createChatGPTRoutes } from "../routes/chatgpt";
 
-test("ChatGPT is disabled by default and the server rejects login/model refresh without touching credentials or network", withFixture(async ({ root }) => {
+test("ChatGPT is enabled by default and explicit disabling rejects login/model refresh without touching credentials or network", withFixture(async ({ root }) => {
     const previous = process.env.MYAGENT_ENABLE_CHATGPT;
     delete process.env.MYAGENT_ENABLE_CHATGPT;
     let fetched = 0;
     const store = new ChatGPTStore(join(root, "disabled.json"));
     const service = new ChatGPTService({ store, fetch: (async () => { fetched++; throw new Error("unreachable"); }) as never });
     try {
-        for (const value of [undefined, "0", "true", "yes"]) {
-            if (value === undefined) delete process.env.MYAGENT_ENABLE_CHATGPT; else process.env.MYAGENT_ENABLE_CHATGPT = value;
+        expect(service.enabled()).toBe(true);
+        for (const value of ["0", "true", "yes"]) {
+            process.env.MYAGENT_ENABLE_CHATGPT = value;
             expect(service.status()).toEqual({ enabled: false, connected: false, accounts: [] });
             expect(service.models()).toEqual([]);
             await expect(service.startLogin()).rejects.toThrow("MYAGENT_ENABLE_CHATGPT=1");

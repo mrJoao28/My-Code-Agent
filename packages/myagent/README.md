@@ -96,11 +96,12 @@ de origem. Chaves são mascaradas na CUI, mas salvas sem criptografia própria n
 perfil do usuário; no POSIX os arquivos privados usam modo 0600, no Windows
 proteja o diretório pelas ACLs.
 
-O login ChatGPT fica **desligado por padrão**. Somente `MYAGENT_ENABLE_CHATGPT=1`
-habilita o fluxo OAuth no navegador; os tokens da conta ficam no diretório global.
+O login ChatGPT fica **ativado por padrão**. Use “Continuar com ChatGPT / gerenciar
+contas” para iniciar o fluxo OAuth no navegador; os tokens ficam no diretório global.
+Para desativar, defina `MYAGENT_ENABLE_CHATGPT=0` e reinicie o aplicativo.
 Essa integração pode depender de plano/permissões e mudar com o provedor.
 Consulte [dados enviados e login ChatGPT](https://github.com/mrJoao28/My-Code-Agent#dados-enviados-e-login-chatgpt)
-antes de habilitar ou enviar código privado.
+antes de conectar sua conta ou enviar código privado.
 
 Gerações interrompidas são mostradas ao reabrir e a CUI pergunta antes de retomar
 ou gastar tokens. Um efeito iniciado pode ter desfecho desconhecido: inspecione

@@ -49,7 +49,7 @@ export class ChatGPTService {
         this.store = options.store ?? new ChatGPTStore();
         this.fetcher = options.fetch ?? fetch;
     }
-    enabled() { return this.options.enabled?.() ?? process.env.MYAGENT_ENABLE_CHATGPT === "1"; }
+    enabled() { return this.options.enabled?.() ?? (process.env.MYAGENT_ENABLE_CHATGPT ?? "1") === "1"; }
     private requireEnabled() { if (!this.enabled()) throw new Error("Login ChatGPT desativado. Defina MYAGENT_ENABLE_CHATGPT=1 para habilitar."); }
     status() {
         if (!this.enabled()) return { enabled: false, connected: false, accounts: [] };

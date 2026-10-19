@@ -126,12 +126,12 @@ preservando Host e verificação TLS/SNI. Cada redirect é validado novamente.
 Redirect para outro domínio exige nova chamada quando a aprovação vale por domínio.
 Não usa cookies do navegador, proxy do ambiente nem credenciais embutidas na URL.
 
-**O login ChatGPT fica desligado por padrão.** Para habilitar, defina
-`MYAGENT_ENABLE_CHATGPT=1` no ambiente ou em `~/.myagent/config.env` e reinicie o
-aplicativo. Outras configurações desse valor não habilitam o login. Depois use
-“Continuar com ChatGPT / gerenciar contas”; habilitar a variável não faz login
-sozinho. Sem a opção, o servidor bloqueia login, descoberta de modelos e uso de
-credenciais ChatGPT já salvas.
+**O login ChatGPT fica ativado por padrão.** Use “Continuar com ChatGPT / gerenciar
+contas” para conectar sua conta; a disponibilidade da opção não faz login sozinha.
+Para desativar, defina `MYAGENT_ENABLE_CHATGPT=0` no ambiente ou em
+`~/.myagent/config.env` e reinicie o aplicativo. Quando a variável está definida,
+somente o valor `1` habilita o login. Com o login desativado, o servidor bloqueia
+login, descoberta de modelos e uso de credenciais ChatGPT já salvas.
 
 O fluxo implementado neste projeto abre o navegador em `auth.openai.com`, solicita
 autorização OAuth com PKCE (`S256`), state e nonce, e recebe o código em um callback
@@ -145,7 +145,7 @@ por modo `0600` e no Windows a proteção depende das ACLs do perfil.
 Esses tokens permitem agir com as permissões concedidas: proteja também cópias de
 segurança do diretório global. Desconectar apaga os tokens locais e tenta a revogação
 remota quando a integração está habilitada; uma falha de revogação é informada.
-Desabilitar a variável impede o uso, mas não apaga nem revoga credenciais já salvas.
+Definir `MYAGENT_ENABLE_CHATGPT=0` impede o uso, mas não apaga nem revoga credenciais já salvas.
 O fluxo é uma implementação deste aplicativo, não uma garantia de compatibilidade
 com todo plano/conta; endpoints, permissões, limites e elegibilidade podem mudar.
 Confira a autorização no navegador e os controles da conta antes de enviar código.
