@@ -9,6 +9,7 @@ import { DialogProvider, useDialog } from "../providers/dialog";
 let cancelled = 0;
 let created: unknown;
 let cloudModels = false;
+let estimatedModels = false;
 let enabled = true;
 let broken = false;
 let configuredKey: unknown;
@@ -16,7 +17,7 @@ const selected: string[] = [];
 mock.module("../lib/open-browser", () => ({ browserCommand, openBrowser: async () => {} }));
 mock.module("../lib/api-client", () => ({ appClient: {
     models: {
-        $get: async () => broken ? Response.json({ error: "models.json corrompido: corrija o arquivo" }, { status: 503 }) : Response.json(cloudModels ? [{ id: "fixture-cloud", provider: "openai", configured: false }] : []),
+        $get: async () => broken ? Response.json({ error: "models.json corrompido: corrija o arquivo" }, { status: 503 }) : Response.json(estimatedModels ? [{ id: "chatgpt:gpt-5.6-luna", provider: "chatgpt", configured: true, contextWindow: 65536, contextWindowEstimated: true }] : cloudModels ? [{ id: "fixture-cloud", provider: "openai", configured: false }] : []),
         ":id": { key: { $post: async ({ json }: { json: unknown }) => { configuredKey = json; return Response.json({ configured: true }); } } },
         $post: async ({ json }: { json: unknown }) => { created = json; return Response.json({ ok: true }, { status: 201 }); },
     },
@@ -46,6 +47,17 @@ async function renderHarness(options: Parameters<typeof testRender>[1] = {}) {
     await act(async () => { ui = await testRender(<Harness />, { width: 90, height: 40, ...options }); });
     return ui;
 }
+
+test("model dialog displays estimated context windows and preserves keyboard selection", async () => {
+    estimatedModels = true; selected.length = 0;
+    const ui = await renderHarness({ width: 110 });
+    try {
+        await ui.waitForFrame(frame => frame.includes("65536 tokens (estimada)"));
+        await act(async () => { ui.mockInput.pressArrow("down"); ui.mockInput.pressArrow("down"); });
+        await act(async () => { ui.mockInput.pressEnter(); });
+        expect(selected).toEqual(["chatgpt:gpt-5.6-luna"]);
+    } finally { estimatedModels = false; await act(async () => { ui.renderer.destroy(); }); }
+});
 
 test("model dialog Enter/arrow navigation adds a local model without an API key", async () => {
     created = undefined; selected.length = 0;

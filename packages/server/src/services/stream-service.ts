@@ -5,16 +5,14 @@ import type { Mode } from "@myagent/database/enums";
 import type { ChatStreamEvent, MessagePart } from "@myagent/shared";
 import { toolCallArgsSchema } from "@myagent/shared";
 import { resolveChatModel } from "../lib/models";
-import { buildSystemPrompt } from "../prompts";
-import { createTools, GLOBAL_GENERATION_TIMEOUT_MS, ToolCallGuard, ToolCallLimitError, ToolLoopDetectedError } from "./tool-service";
+import { GLOBAL_GENERATION_TIMEOUT_MS, ToolCallGuard, ToolCallLimitError, ToolLoopDetectedError } from "./tool-service";
 import { logger } from "../lib/logger";
 import type { ModelMessage, ToolSet } from "ai";
 import type { ToolSecurityOptions } from "../security/tool-policy";
-import { contextBudget, persistSessionContext, refreshSessionContext } from "./session-context";
-import { findModel } from "../lib/model-registry";
+import { contextBudget, ContextBudgetError, persistSessionContext, refreshSessionContext } from "./session-context";
+import { prepareGenerationContext } from "./context-plan";
 import { ProjectInstructions } from "../lib/project-instructions";
 import { authorizeWorkspace } from "../security/workspaces";
-import { isDockerAvailable } from "../security/sandbox";
 import { redactGitArgs, redactGitOutput } from "../utils/git";
 
 const generations = new Set<{ controller: AbortController; done: Promise<void> }>();
@@ -63,7 +61,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
     const abortRequest = () => abortController.abort(params.requestSignal?.reason);
     params.requestSignal?.addEventListener("abort", abortRequest, { once: true });
     if (params.requestSignal?.aborted) abortRequest();
-    let budget: ReturnType<typeof contextBudget> | undefined;
+    let budget: Awaited<ReturnType<typeof contextBudget>> | undefined;
     const saveContext = dependencies.saveContext ?? ((messages, signal) => persistSessionContext(db, sessionId, messages, signal, false, budget?.tokenLimit));
     const refreshContext = dependencies.refreshContext ?? (() => refreshSessionContext(db, sessionId, undefined, budget?.tokenLimit));
     const refreshAfterPersistence = async () => {
@@ -78,7 +76,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
     let pushing = false;
     const executions = new Set<Promise<unknown>>();
     let journal: GenerationJournal | undefined;
-    const tools = cwd ? (dependencies.createTools ?? createTools)(cwd, mode, sessionId, {
+    const security: ToolSecurityOptions = {
         trackExecution: async run => {
             const execution = run(); executions.add(execution);
             try { return await execution; } finally { executions.delete(execution); }
@@ -109,7 +107,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
             await journal!.result(id, name, result);
         },
         notify: async event => { await stream.writeSSE({ event: event.type, data: JSON.stringify(event) }); },
-    }, instructions) : undefined;
+    };
     let parts: MessagePart[] = [];
     // O executor pode adiantar chamadas; a versão final segue a ordem observada no SSE.
     const observedParts: MessagePart[] = [];
@@ -168,20 +166,22 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
             detachProviderAbort = () => providerSignal.removeEventListener("abort", abort);
             if (providerSignal.aborted) abort();
         }
-        const configuredTools = tools && resolvedModel.toolOptions
-            ? Object.fromEntries(Object.entries(tools).map(([name, definition]) => [name, { ...definition, providerOptions: resolvedModel.toolOptions }]))
-            : tools;
         abortController.signal.throwIfAborted();
         if (cwd) await authorizeWorkspace(cwd);
-        const projectInstructions = await instructions?.root(abortController.signal);
-        const system = buildSystemPrompt({ cwd: cwd ?? "", mode, availableTools: Object.keys(configuredTools ?? {}), sandboxConfigured: isDockerAvailable(), maxToolCalls: toolGuard.limit, projectInstructions });
-        budget = contextBudget(resolvedModel.contextWindow ?? findModel(model)?.contextWindow, system, configuredTools);
+        const plan = await prepareGenerationContext({ modelId: model, cwd, mode, sessionId, resolvedModel, instructions, security, createTools: dependencies.createTools, maxToolCalls: toolGuard.limit, signal: abortController.signal });
+        const configuredTools = plan.tools, system = plan.system;
+        budget = plan.budget;
+        if (plan.compact) {
+            const warning: Extract<MessagePart, { type: "context-warning" }> = { type: "context-warning", contextWindow: plan.window.contextWindow, estimated: plan.window.contextWindowEstimated, toolCount: budget.toolCount, message: `Janela de ${plan.window.contextWindow} tokens${plan.window.contextWindowEstimated ? " (estimada)" : ""}: perfil compacto com ${budget.toolCount} ferramentas essenciais e ~${budget.tokenLimit} tokens para mensagens. Configure contextWindow para liberar o perfil completo.` };
+            parts.push(warning); observedParts.push(warning); await journal.save();
+            await stream.writeSSE({ event: warning.type, data: JSON.stringify(warning) });
+        }
         const result = (dependencies.generate ?? aiStreamText)({
             model: resolvedModel.model,
             system,
             maxOutputTokens: budget.responseTokens,
             tools: configuredTools,
-            stopWhen: tools ? stepCountIs(toolGuard.limit + 1) : undefined,
+            stopWhen: configuredTools ? stepCountIs(toolGuard.limit + 1) : undefined,
             messages: history,
             prepareStep: async ({ messages }) => {
                 abortController.signal.throwIfAborted();
@@ -362,11 +362,16 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
         abortController.abort(e);
         await Promise.allSettled([...executions]);
         if (journal) {
-            parts.push({ type: "text", text: `\n[Erro: ${message}]` });
-            await persistInterruptedMessage();
+            if (e instanceof ContextBudgetError) {
+                await journal.save({ role: "ERROR", status: "COMPLETE", content: message, totalTokens, duration: Math.round((Date.now() - startTime) / 1000) });
+                messagePersisted = true; await touchSession(sessionId); await refreshAfterPersistence();
+            } else {
+                parts.push({ type: "text", text: `\n[Erro: ${message}]` });
+                await persistInterruptedMessage();
+            }
         }
 
-        const errorEvent: ChatStreamEvent = { type: "error", message, messageId: journal?.id, parts: journal ? structuredClone(parts) : undefined };
+        const errorEvent: ChatStreamEvent = { type: "error", message, ...(e instanceof ContextBudgetError && { kind: "context" as const }), messageId: journal?.id, parts: journal ? structuredClone(parts) : undefined };
         await stream.writeSSE({ event: "error", data: JSON.stringify(errorEvent) });
     } finally {
         params.requestSignal?.removeEventListener("abort", abortRequest);

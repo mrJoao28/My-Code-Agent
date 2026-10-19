@@ -11,6 +11,8 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withFixture } from "../test-support";
 import { contextBudget, fitContextWindow, persistSessionContext } from "./session-context";
+import { writeModelPreferences } from "../lib/context-window";
+import { CHATGPT_CONTEXT_OPTIONS } from "../lib/providers/chatgpt";
 
 test("every generation reloads root instructions and delivers local instructions through real SDK tool results", withFixture(async ({ cwd }) => {
     await mkdir(join(cwd, "src"));
@@ -107,7 +109,7 @@ test("real SDK completes 30 successive reads with every middle line visible and 
         expect(snapshots).toHaveLength(31);
         for (const snapshot of snapshots as { tokenLimit: number }[]) {
             expect(snapshot.tokenLimit).toBeGreaterThan(16_384);
-            expect(snapshot.tokenLimit).toBeLessThan(contextBudget(200_000).tokenLimit);
+            expect(snapshot.tokenLimit).toBeLessThan((await contextBudget(200_000)).tokenLimit);
         }
         expect(fixture.params.abortController.signal.aborted).toBe(false);
         expect(fixture.events.at(-1)?.event).toBe("done");
@@ -202,6 +204,24 @@ test("real SDK stops tool use after approved push and asks for GitHub release be
     } finally { if (previousRoots === undefined) delete process.env.MYAGENT_WORKSPACE_ROOTS; else process.env.MYAGENT_WORKSPACE_ROOTS = previousRoots; }
 }), 30_000);
 
+test("impossible window fails before the provider with numerical context error and persists ERROR instead of INTERRUPTED", withFixture(async ({ cwd }) => {
+    const fixture = setup([]);
+    fixture.params.model = "chatgpt:tiny-fixture"; fixture.params.cwd = cwd;
+    writeModelPreferences({ contextWindows: { "chatgpt:tiny-fixture": 1024 } });
+    const previousRoots = process.env.MYAGENT_WORKSPACE_ROOTS;
+    process.env.MYAGENT_WORKSPACE_ROOTS = JSON.stringify([cwd]);
+    let calls = 0;
+    fixture.dependencies.resolveModel = () => ({ model: {} as never, provider: "chatgpt", modelId: fixture.params.model, ...CHATGPT_CONTEXT_OPTIONS });
+    fixture.dependencies.generate = (() => { calls++; throw new Error("provider must not run"); }) as never;
+    try {
+        await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+        expect(calls).toBe(0);
+        expect(fixture.created[0]).toMatchObject({ role: "ERROR", status: "COMPLETE" });
+        expect(String(fixture.created[0]?.content)).toMatch(/1024 tokens \(estimada\).*ferramentas.*Configure contextWindow/);
+        expect(JSON.parse(fixture.events.at(-1)!.data)).toMatchObject({ type: "error", kind: "context", messageId: "saved-message" });
+    } finally { if (previousRoots === undefined) delete process.env.MYAGENT_WORKSPACE_ROOTS; else process.env.MYAGENT_WORKSPACE_ROOTS = previousRoots; }
+}));
+
 function setup(parts: unknown[], controller = new AbortController()) {
     const created: Record<string, unknown>[] = [], events: { event: string; data: string }[] = [];
     const create = mock(async ({ data }: { data: Record<string, unknown> }) => { created.push(data); return { id: "saved-message" }; });
@@ -211,7 +231,7 @@ function setup(parts: unknown[], controller = new AbortController()) {
         touchSession: mock(async () => {}),
         saveContext: async messages => messages,
         refreshContext: mock(async () => {}),
-        resolveModel: (() => ({ model: {}, provider: "ollama", modelId: "fixture" })) as unknown as StreamDependencies["resolveModel"],
+        resolveModel: (() => ({ model: {}, provider: "ollama", modelId: "fixture", contextWindow: 131_072 })) as unknown as StreamDependencies["resolveModel"],
         generate: (() => ({ fullStream: (async function* () {
             for (const part of parts) {
                 if (part === "abort") { controller.abort(); return; }
@@ -290,7 +310,7 @@ test.each([[1, 3], [3, 5], [5, 7], [40, 38]])("real SDK with budget %s and batch
         ]) };
     } });
     fixture.dependencies.generate = streamText;
-    fixture.dependencies.resolveModel = () => ({ model: provider, provider: "ollama", modelId: "fixture" });
+    fixture.dependencies.resolveModel = () => ({ model: provider, provider: "ollama", modelId: "fixture", contextWindow: 131_072 });
     try {
         await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
         expect(provider.doStreamCalls).toHaveLength(2);

@@ -10,8 +10,13 @@ const toolLimitWarningSchema = z.object({
     type: z.literal("tool-limit-warning"),
     limit: z.number().int().positive().max(200),
 })
+const contextWarningSchema = z.object({
+    type: z.literal("context-warning"), contextWindow: z.number().int().positive(),
+    estimated: z.boolean(), toolCount: z.number().int().nonnegative(), message: z.string(),
+});
 
 export const messagePartSchema = z.discriminatedUnion("type", [
+    contextWarningSchema,
     toolLimitWarningSchema,
     z.object({
         type: z.literal("reasoning"),
@@ -44,6 +49,7 @@ export type MessagePart = z.infer<typeof messagePartSchema>
 export type MessageParts = z.infer<typeof messagePartsSchema>
 
 export const chatStreamEventSchema = z.discriminatedUnion("type", [
+    contextWarningSchema,
     toolLimitWarningSchema,
     z.object({ type: z.literal("generation-started"), messageId: z.string() }),
     z.object({
@@ -87,6 +93,7 @@ export const chatStreamEventSchema = z.discriminatedUnion("type", [
     }),
     z.object({
         type: z.literal("error"),
+        kind: z.literal("context").optional(),
         message: z.string(),
         messageId: z.string().optional(),
         parts: messagePartsSchema.optional(),

@@ -136,6 +136,40 @@ exibido e N nega. Exclusão e commit sempre pedem aprovação individual. O coma
 os checkpoints ficam no diretório global, sem commits no projeto. Veja
 [aprovações e desfazer](docs/APROVACOES_E_UNDO.md).
 
+## Janela de contexto e ferramentas
+
+A janela é resolvida por uma única política: override por modelo, catálogo,
+snapshot datado de uma família conhecida e, por fim, padrão conservador.
+Modelos cloud sem metadados usam **65.536 tokens estimados**, sem garantia de que
+essa seja a capacidade real. Ollama e modelos customizados usam 16.384 por padrão.
+O seletor mostra o tamanho e marca valores fora do catálogo como **estimados**.
+
+Para configurar qualquer modelo, inclusive IDs `chatgpt:`, crie
+`~/.myagent/model-preferences.json` (ou dentro de `MYAGENT_HOME`). Exemplo
+ilustrativo: substitua a janela pela capacidade verificada para sua conta/modelo.
+
+```json
+{
+  "contextWindows": { "chatgpt:gpt-5.6-luna": 131072 },
+  "defaultLocalContextWindow": 16384
+}
+```
+
+O override em preferências prevalece sobre `contextWindow` em `models.json`.
+Valores devem ser inteiros entre 1.024 e 2.147.483.647; arquivo inválido produz
+erro claro e é preservado. No POSIX, proteja o arquivo com modo `0600`.
+O padrão local configurável vale para modelos customizados sem janela explícita
+e modelos locais fora do catálogo; não substitui capacidades do catálogo.
+
+Abaixo de 32.768 tokens, o perfil compacto expõe somente leitura, busca, edição,
+escrita e Git básico; bash só aparece em BUILD com sandbox disponível. PLAN
+continua sem mutações. A interface e o histórico registram o aviso de redução.
+O custo das ferramentas usa nome, descrição, JSON Schema e opções do provider,
+com cache por conjunto; não serializa internals do Zod. System prompt e schemas
+são descontados do orçamento, com reserva para a resposta. Se nem o perfil
+compacto couber, o erro informa janela, quantidade de ferramentas e custo
+estimado, e orienta configurar `contextWindow` ou escolher outro modelo.
+
 ## Dados enviados e login ChatGPT
 
 O agente envia ao **provedor do modelo selecionado** o pedido, o system prompt,

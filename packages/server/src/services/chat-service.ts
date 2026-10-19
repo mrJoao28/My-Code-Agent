@@ -7,14 +7,15 @@ import { db } from "@myagent/database";
 import { Mode, MessageStatus } from "@myagent/database";
 import type { ChatStreamEvent } from "@myagent/shared";
 import { isModelConfigured, isSupportedChatModel } from "../lib/models";
-import { findModel } from "../lib/model-registry";
+import { resolveContextWindow } from "../lib/context-window";
 import { touchSession } from "./message-service";
 import { streamAIResponse } from "./stream-service";
 import { logger } from "../lib/logger";
 import { validateSessionWorkspace } from "../security/workspaces";
 import type { SessionLeases } from "./session-lease";
 import { markSessionUsed } from "./session-lifecycle";
-import { contextBudget, fitContextWindow, refreshSessionContext } from "./session-context";
+import { fitContextWindow, refreshSessionContext } from "./session-context";
+import { prepareGenerationContext } from "./context-plan";
 
 const activeResumeSessionIds = activeSessionGenerations;
 let sessionLeases: SessionLeases | undefined;
@@ -56,7 +57,8 @@ export async function handleResume(c: Context, dependencies: ChatDependencies = 
   if (!isSupportedChatModel(resumableMessage.model)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: `Session uses unsupported model: ${resumableMessage.model}` }, 409); }
   if (!isModelConfigured(resumableMessage.model)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "MODEL_API_KEY_REQUIRED", model: resumableMessage.model }, 428); }
   const previousParts = resumableMessage.role === "ASSISTANT" ? await previousGenerationParts(db, resumableMessage) : [];
-  const history = await refreshSessionContext(db, sessionId, c.req.raw.signal, contextBudget(findModel(resumableMessage.model)?.contextWindow).tokenLimit);
+  const plan = await prepareGenerationContext({ modelId: resumableMessage.model, cwd: session.cwd, mode: resumableMessage.mode, sessionId, signal: c.req.raw.signal });
+  const history = await refreshSessionContext(db, sessionId, c.req.raw.signal, plan.budget.tokenLimit);
   const abortController = new AbortController();
     return streamSSE(c, async (stream) => {
       stream.onAbort(() => abortController.abort());
@@ -96,7 +98,8 @@ export async function handleSubmit(c: Context, data: SubmitBody, dependencies: C
   activeResumeSessionIds.add(sessionId);
 
   try {
-    fitContextWindow([{ role: "user", content: data.content }], contextBudget(findModel(data.model)?.contextWindow).tokenLimit);
+    // Rejeição barata antes de persistir; a validação com prompt/tools usa o plano completo abaixo.
+    fitContextWindow([{ role: "user", content: data.content }], Math.floor(resolveContextWindow(data.model).contextWindow * 0.8));
     const session = await db.session.findUnique({ where: { id: sessionId } });
     if (!session) {
       activeResumeSessionIds.delete(sessionId);
@@ -107,12 +110,14 @@ export async function handleSubmit(c: Context, data: SubmitBody, dependencies: C
     await sessionLeases?.acquire(sessionId);
     await recoverOrphanedGenerations(db, sessionId);
     if (!await markSessionUsed(db, sessionId)) { activeResumeSessionIds.delete(sessionId); return c.json({ error: "Session not found" }, 404); }
+    const plan = await prepareGenerationContext({ modelId: data.model, cwd: session.cwd, mode: data.mode, sessionId, signal: c.req.raw.signal });
+    fitContextWindow([{ role: "user", content: data.content }], plan.budget.tokenLimit);
     await db.message.create({ data: { sessionId, role: "USER", status: MessageStatus.COMPLETE, model: data.model, content: data.content, mode: data.mode } });
     // BUGFIX: `Session.updatedAt` nunca era tocado, então a sessão não
     // subia na listagem (ordenada por atividade recente) assim que o
     // usuário mandava uma nova mensagem. Veja touchSession em message-service.ts.
     await touchSession(sessionId);
-    const history = await refreshSessionContext(db, sessionId, c.req.raw.signal, contextBudget(findModel(data.model)?.contextWindow).tokenLimit);
+    const history = await refreshSessionContext(db, sessionId, c.req.raw.signal, plan.budget.tokenLimit);
     const abortController = new AbortController();
 
     return streamSSE(c, async (stream) => {

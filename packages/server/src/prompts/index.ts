@@ -12,18 +12,20 @@ type SystemPromptParams = {
     sandboxConfigured?: boolean;
     maxToolCalls?: number;
     projectInstructions?: string;
+    contextNote?: string;
 };
 
-export function buildSystemPrompt({ cwd, mode, availableTools = [], sandboxConfigured = false, maxToolCalls = getMaxToolCalls(), projectInstructions }: SystemPromptParams): string {
+export function buildSystemPrompt({ cwd, mode, availableTools = [], sandboxConfigured = false, maxToolCalls = getMaxToolCalls(), projectInstructions, contextNote }: SystemPromptParams): string {
     const tools = cwd ? availableTools : [];
     const capabilities = [
         mode === "PLAN" ? PLAN_MODE_TEXT : BUILD_MODE_TEXT,
         cwd ? buildCwdNote(cwd) : "Sem workspace autorizado.",
         `Ferramentas disponíveis: ${tools.length ? tools.join(", ") : "nenhuma"}.`,
+        ...(contextNote ? [contextNote] : []),
         `Sandbox declarada: ${sandboxConfigured ? "Docker disponível; a imagem será verificada antes da execução" : "imagem não configurada; processos indisponíveis. Docker indisponível: não há execução de comandos; não tente shell, typecheck ou testes executáveis"}.`,
         EXECUTION_RULES_TEXT,
         `Limites: ${maxToolCalls} chamadas, até três chamadas idênticas e cinco minutos por geração. Resultados truncados não representam todo o conteúdo.`,
-        "Economize chamadas: prefira grep/project_inspect, leia arquivos em lote com read_files e não repita leituras. Ao se aproximar do limite, pare a investigação e resuma achados confirmados e o que ficou por verificar.",
+        "Economize chamadas: prefira busca direcionada e leitura em lote quando disponíveis na lista; não repita leituras. Ao se aproximar do limite, pare a investigação e resuma achados confirmados e o que ficou por verificar.",
     ].join("\n");
 
     return [

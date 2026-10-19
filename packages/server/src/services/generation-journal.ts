@@ -22,7 +22,7 @@ export class GenerationJournal {
     readonly parts: MessagePart[] = [];
     private queue: Promise<unknown> = Promise.resolve();
     constructor(private db: Database, readonly id: string) {}
-    save(extra: { status?: "COMPLETE" | "INTERRUPTED"; totalTokens?: number | null; duration?: number; content?: string } = {}) {
+    save(extra: { role?: "ERROR"; status?: "COMPLETE" | "INTERRUPTED"; totalTokens?: number | null; duration?: number; content?: string } = {}) {
         const write = this.queue.then(() => this.db.message.update({ where: { id: this.id }, data: {
             content: extractFullText(this.parts), parts: structuredClone(this.parts), ...extra,
         } }));

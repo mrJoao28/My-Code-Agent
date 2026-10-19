@@ -6,6 +6,7 @@ import { resolveGoogleModel } from "./google";
 import { resolveOllamaModel } from "./ollama";
 import { resolveChatGPTModel } from "./chatgpt";
 import { assertUnsupportedProvider, type ResolvedModel } from "./registry";
+import { resolveContextWindow } from "../context-window";
 
 export type { ResolvedModel } from "./registry";
 
@@ -47,5 +48,5 @@ export function resolveChatModel(modelId: string): ResolvedModel {
     throw new Error(`Missing API token for model: ${modelId}`);
   }
 
-  return { ...resolveSupportedModel(model.provider, model.id, apiKey), contextWindow: model.contextWindow };
+  return { ...resolveSupportedModel(model.provider, model.id, apiKey), ...resolveContextWindow(modelId, { provider: model.provider }) };
 }

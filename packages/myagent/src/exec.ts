@@ -129,7 +129,7 @@ export async function runExec(options: ExecOptions): Promise<number> {
         const token = randomBytes(32).toString("hex");
         server = await startServer({ port: 0, token, workspace, sessionId: session.id, automationApproval: options.approve, allowPush: options.allowPush, onLockLost: interrupt, signal: controller.signal });
         const result = await executePrompt(options, { url: server.url, token, workspace, sessionId: session.id, signal: controller.signal }, {
-            event: options.json ? event => { console.log(JSON.stringify(event)); } : undefined,
+            event: event => { if (options.json) console.log(JSON.stringify(event)); else if (event.type === "context-warning") console.error(event.message); },
         });
         if (options.json) console.log(JSON.stringify(result));
         else { if (result.text) console.log(result.text); if (result.error) console.error(result.error); }

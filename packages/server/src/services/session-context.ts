@@ -1,5 +1,5 @@
 import type { PrismaClient, Prisma } from "@myagent/database";
-import { modelMessageSchema, type ModelMessage } from "ai";
+import { asSchema, modelMessageSchema, type FlexibleSchema, type ModelMessage } from "ai";
 import { SUMMARY_PREFIX, summarizeContext } from "./context-summary";
 import { DEFAULT_MODEL_CONTEXT_WINDOW, validContextWindow, messagePartsSchema } from "@myagent/shared";
 
@@ -42,6 +42,7 @@ export function contextFromMessages(rows: readonly SourceMessage[]): ModelMessag
         if (!parts.length && row.content) messages.push({ role: "assistant", content: row.content });
         const seen = new Set<string>();
         for (const part of parts) {
+            if (part.type === "context-warning") messages.push({ role: "assistant", content: `[Aviso de contexto: ${part.message}]` });
             if (part.type === "tool-limit-warning") messages.push({ role: "assistant", content: `[Resposta parcial por limite de tool calls (${part.limit}). Há verificações pendentes; não repetir automaticamente ações com efeitos colaterais.]` });
             if (part.type === "text" && part.text) messages.push({ role: "assistant", content: part.text });
             if (part.type !== "tool-call" || seen.has(part.id)) continue;
@@ -60,13 +61,34 @@ export function contextFromMessages(rows: readonly SourceMessage[]): ModelMessag
     return messages;
 }
 
-/** Reserva 20% de segurança/saída e desconta system prompt e schemas das tools. */
-export function contextBudget(contextWindow = DEFAULT_MODEL_CONTEXT_WINDOW, system = "", toolDefinitions: unknown = {}) {
+const toolMeasurements = new WeakMap<object, Promise<{ tokens: number; characters: number; count: number }>>();
+/** Mede somente o contrato enviado pelo SDK. Zod, executores e callbacks não são tokens. */
+export function measureToolDefinitions(definitions: object = {}) {
+    let measured = toolMeasurements.get(definitions);
+    if (!measured) {
+        measured = (async () => {
+            const wire = await Promise.all(Object.entries(definitions).map(async ([name, definition]) => {
+                const tool = definition as { description?: string; inputSchema?: FlexibleSchema<unknown>; providerOptions?: unknown };
+                return { name, description: tool.description, inputSchema: await asSchema(tool.inputSchema).jsonSchema, ...(tool.providerOptions !== undefined ? { providerOptions: tool.providerOptions } : {}) };
+            }));
+            const text = JSON.stringify(wire);
+            return { tokens: Math.ceil(Buffer.byteLength(text, "utf8") / 3), characters: text.length, count: wire.length };
+        })();
+        toolMeasurements.set(definitions, measured);
+    }
+    return measured;
+}
+export class ContextBudgetError extends Error {}
+/** Reserva 20% de segurança/saída e desconta system prompt, schemas e opções reais. */
+export async function contextBudget(contextWindow = DEFAULT_MODEL_CONTEXT_WINDOW, system = "", toolDefinitions: object = {}, providerOptions?: unknown, estimated = false) {
     if (!validContextWindow(contextWindow)) throw new Error("contextWindow inválido");
-    const reservedInputTokens = estimateContextTokens([{ role: "system", content: system + JSON.stringify(toolDefinitions) }]);
+    const tools = await measureToolDefinitions(toolDefinitions);
+    const systemTokens = estimateContextTokens([{ role: "system", content: system }]);
+    const optionTokens = providerOptions ? Math.ceil(Buffer.byteLength(JSON.stringify(providerOptions), "utf8") / 3) : 0;
+    const reservedInputTokens = systemTokens + tools.tokens + optionTokens;
     const tokenLimit = Math.floor(contextWindow * 0.8) - reservedInputTokens;
-    if (tokenLimit < 128) throw new Error("CONTEXT_MESSAGE_TOO_LARGE: janela insuficiente para o system prompt e ferramentas");
-    return { tokenLimit, responseTokens: Math.min(32_768, Math.floor(contextWindow * 0.15)) };
+    if (tokenLimit < 128) throw new ContextBudgetError(`CONTEXT_MESSAGE_TOO_LARGE: A janela de ${contextWindow} tokens${estimated ? " (estimada)" : ""} não comporta o system prompt e ${tools.count} ferramentas (~${reservedInputTokens} tokens), além da reserva de resposta. Configure contextWindow para este modelo em model-preferences.json ou escolha outro modelo.`);
+    return { tokenLimit, responseTokens: Math.min(32_768, Math.floor(contextWindow * 0.15)), reservedInputTokens, toolTokens: tools.tokens, toolCount: tools.count, systemTokens };
 }
 
 /** Corte somente no fim. Páginas de leitura continuam em limites de linhas. */

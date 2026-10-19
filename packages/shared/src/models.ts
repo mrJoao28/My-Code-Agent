@@ -1,4 +1,10 @@
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 16_384;
+// Fallback operacional para APIs cloud sem metadados de janela. Não é uma
+// capacidade verificada do modelo: deve ser exibido como estimado e permite override.
+export const DEFAULT_CLOUD_CONTEXT_WINDOW = 65_536;
+export const COMPACT_CONTEXT_THRESHOLD = 32_768;
+export type ContextWindowSource = "override" | "catalog" | "family" | "provider" | "default";
+export type ContextWindowResolution = { contextWindow: number; contextWindowEstimated: boolean; contextWindowSource: ContextWindowSource };
 
 export function validContextWindow(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1_024 && value <= 2_147_483_647;
@@ -17,6 +23,8 @@ export type SupportedChatModelDefinition = {
   displayName?: string;
   pricing: ModelPricing;
   contextWindow: number;
+  contextWindowEstimated?: boolean;
+  contextWindowSource?: ContextWindowSource;
 };
 
 export const SUPPORTED_CHAT_MODELS = [

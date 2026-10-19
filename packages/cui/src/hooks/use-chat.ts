@@ -9,6 +9,7 @@ import type { Mode } from "@myagent/database"
 import { type ChatStreamEvent, type MessagePart, type SupportedChatModelId } from "@myagent/shared"
 
 export type ClientMessagePart =
+  | Extract<MessagePart, { type: "context-warning" }>
   | { type: "tool-limit-warning"; limit: number }
   | { type: "reasoning"; text: string }
   | ClientToolCallPart
@@ -132,6 +133,7 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
           activeStream.messageId = event.messageId
           break
         case "tool-limit-warning":
+        case "context-warning":
           parts.push(event)
           emitParts(activeStream.requestId, parts)
           break
@@ -180,6 +182,12 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
           return
         }
         case "error":
+          if (event.kind === "context") {
+            activeStream.interruptedCaptured = true
+            updateMessages(prev => [...prev, { id: event.messageId ?? crypto.randomUUID(), role: "error", content: event.message, totalTokens: activeStream.totalTokens }])
+            setStreaming({ status: "idle" })
+            return
+          }
           if (event.messageId) {
             activeStream.messageId = event.messageId
             activeStream.parts = event.parts ? clientMessageParts(event.parts) : [...parts]

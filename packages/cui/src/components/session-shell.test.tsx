@@ -14,6 +14,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const cases: { name: string; parts: ClientMessagePart[]; loading?: boolean }[] = [
+    { name: "compact context warning", parts: [{ type: "context-warning", contextWindow: 16384, estimated: true, toolCount: 10, message: "Perfil compacto: janela estimada de 16384 tokens" }] },
     { name: "waiting", parts: [], loading: true },
     ...["partial reply", "", "   ", "\n\n", "Olá 👋 漢字"].map(text => ({ name: `text ${JSON.stringify(text)}`, parts: [{ type: "text" as const, text }], loading: true })),
     { name: "reasoning", parts: [{ type: "reasoning", text: "Investigando" }], loading: true },
@@ -45,6 +46,7 @@ test.each(cases)("chat renders after sending: $name", async ({ parts, loading = 
         await act(async () => { ui.mockInput.pressEnter(); });
         await ui.waitForFrame(frame => frame.includes("Mensagem") && frame.includes("Falha simulada"));
         expect(ui.captureCharFrame()).toContain("fixture");
+        if (parts.some(part => part.type === "context-warning")) expect(ui.captureCharFrame()).toContain("Perfil compacto: janela estimada de 16384 tokens");
     } finally { if (ui) await act(async () => { ui.renderer.destroy(); }); router.dispose(); }
 });
 

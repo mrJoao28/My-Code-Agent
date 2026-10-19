@@ -1,6 +1,9 @@
 export {
     SUPPORTED_CHAT_MODELS,
     DEFAULT_MODEL_CONTEXT_WINDOW,
+    DEFAULT_CLOUD_CONTEXT_WINDOW,
+    COMPACT_CONTEXT_THRESHOLD,
+    type ContextWindowResolution,
     validContextWindow,
     DEFAULT_CHAT_MODEL_ID,
     findSupportedChatModel,

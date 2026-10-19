@@ -10,7 +10,7 @@ import { appClient } from "../lib/api-client";
 import type { SupportedProvider } from "@myagent/shared";
 import { ChatGPTDialogContent } from "./chatgpt-dialog";
 
-type Model = { id: string; displayName?: string; provider: SupportedProvider; configured: boolean };
+type Model = { id: string; displayName?: string; provider: SupportedProvider; configured: boolean; contextWindow?: number; contextWindowEstimated?: boolean };
 type Props = { onSelectModel: (modelId: string) => void };
 
 const PROVIDERS: { id: Exclude<SupportedProvider, "chatgpt">; label: string; kind: "Cloud" | "Local" }[] = [
@@ -82,12 +82,12 @@ export const ModelDialogContent = ({ onSelectModel }: Props) => {
       filterFn={(item, query) => item.id === addItem.id || item.id === connectItem.id || `${item.id} ${item.displayName ?? ""}`.toLowerCase().includes(query.toLowerCase())}
       renderItem={(item, selected) => (
         <box flexDirection="row" justifyContent="space-between" width="100%">
-          <text fg={selected ? "black" : undefined}>
+          <text fg={selected ? "black" : undefined} flexShrink={1}>
             {item.id === connectItem.id ? "Continuar com ChatGPT / gerenciar contas" : item.id === addItem.id ? "+ Adicionar modelo local / API key" : item.displayName ?? item.id}
           </text>
           {item.id !== addItem.id && item.id !== connectItem.id && (
-            <text attributes={TextAttributes.DIM}>
-              {item.provider === "chatgpt" ? "plano ChatGPT" : item.provider === "ollama" ? "local" : item.configured ? "ready" : "API key required"}
+            <text attributes={TextAttributes.DIM} flexShrink={0}>
+              {item.contextWindow ? `${item.contextWindow} tokens${item.contextWindowEstimated ? " (estimada)" : ""}` : item.provider === "chatgpt" ? "plano ChatGPT" : item.provider === "ollama" ? "local" : item.configured ? "ready" : "API key required"}
             </text>
           )}
         </box>

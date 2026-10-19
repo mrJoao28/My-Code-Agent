@@ -16,20 +16,20 @@ function reading(id: string, path = `${id}.ts`, content = Array.from({ length: 3
     ];
 }
 
-test("model budgets exceed the legacy ceiling and reserve system, tools and output", () => {
-    const budget = contextBudget(200_000, "sistema ".repeat(1_000), { read: { description: "leitura" } });
+test("model budgets exceed the legacy ceiling and reserve system, tools and output", async () => {
+    const budget = await contextBudget(200_000, "sistema ".repeat(1_000), { read: { description: "leitura" } });
     expect(budget.tokenLimit).toBeGreaterThan(16_384);
     expect(budget.tokenLimit + budget.responseTokens).toBeLessThan(200_000);
-    expect(budget.tokenLimit).toBeLessThan(contextBudget(200_000).tokenLimit);
+    expect(budget.tokenLimit).toBeLessThan((await contextBudget(200_000)).tokenLimit);
     const messages: ModelMessage[] = [{ role: "user", content: "x".repeat(60_000) }];
     expect(fitContextWindow(messages, budget.tokenLimit).messages).toEqual(messages);
     for (const invalid of [NaN, Infinity, 0, 1.5, -1]) expect(() => fitContextWindow([], invalid)).toThrow();
 });
 
-test("30 reads in one turn retain every complete page and do not cause a false loop", () => {
+test("30 reads in one turn retain every complete page and do not cause a false loop", async () => {
     const guard = new ToolCallGuard();
     const history: ModelMessage[] = [{ role: "user", content: "Leia os arquivos" }];
-    const budget = contextBudget(200_000).tokenLimit;
+    const budget = (await contextBudget(200_000)).tokenLimit;
     for (let i = 0; i < 30; i++) {
         guard.updateContext(fitContextWindow(history, budget).messages);
         guard.register("read_file", { path: `${i}.ts`, offset: 0 });

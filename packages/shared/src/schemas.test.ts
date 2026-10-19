@@ -21,6 +21,14 @@ test("persisted parts retain reasoning, tool arguments/results and text", () => 
     expect(messagePartsSchema.safeParse([{ type: "tool-call", name: "missing-id" }]).success).toBe(false);
     expect(toolCallArgsSchema.safeParse({ invalid: undefined }).success).toBe(false);
 });
+
+test("context notices and actionable context errors retain their fields in streaming and history", () => {
+    const notice = { type: "context-warning" as const, contextWindow: 16384, estimated: true, toolCount: 12, message: "Perfil compacto" };
+    expect(chatStreamEventSchema.parse(notice)).toEqual(notice);
+    expect(messagePartsSchema.parse([notice])).toEqual([notice]);
+    const error = { type: "error" as const, kind: "context" as const, message: "Configure contextWindow", messageId: "error", parts: [] };
+    expect(chatStreamEventSchema.parse(error)).toEqual(error);
+});
 test("streaming validates approval and terminal event fields", () => {
     expect(chatStreamEventSchema.safeParse({ type: "approval-required", approvalId: "a", toolName: "bash", args: { command: "pwd" } }).success).toBe(true);
     expect(chatStreamEventSchema.safeParse({ type: "approval-required", toolName: "bash", args: {} }).success).toBe(false);

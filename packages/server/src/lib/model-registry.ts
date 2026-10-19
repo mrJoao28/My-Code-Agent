@@ -3,6 +3,7 @@ export { parseCustomModels } from "./model-config";
 import { join } from "node:path";
 import { myagentHome } from "@myagent/shared/home";
 import { chatGPT } from "./chatgpt";
+import { resolveContextWindow } from "./context-window";
 import {
   SUPPORTED_CHAT_MODELS,
   DEFAULT_MODEL_CONTEXT_WINDOW,
@@ -15,7 +16,6 @@ export type CustomModel = SupportedChatModelDefinition & {
   apiKeyEnv?: string;
 };
 
-const CONFIG_PATH = join(myagentHome(), "models.json");
 
 export function getModelApiKeyEnv(model: Pick<SupportedChatModelDefinition, "id" | "provider"> & { apiKeyEnv?: string; pricing?: unknown }) {
   const custom = "apiKeyEnv" in model ? model.apiKeyEnv : undefined;
@@ -30,8 +30,8 @@ export function getModelApiKeyEnv(model: Pick<SupportedChatModelDefinition, "id"
   return `MYAGENT_${model.provider.toUpperCase()}_${normalized}_API_KEY`;
 }
 
-function readCustomModels(): CustomModel[] { return readModelConfig(CONFIG_PATH); }
-function writeCustomModels(models: CustomModel[]) { writeModelConfig(CONFIG_PATH, models); }
+function readCustomModels(): CustomModel[] { return readModelConfig(join(myagentHome(), "models.json")); }
+function writeCustomModels(models: CustomModel[]) { writeModelConfig(join(myagentHome(), "models.json"), models); }
 
 export function getCustomModels(): CustomModel[] {
   return readCustomModels();
@@ -41,7 +41,7 @@ export function getAllModels(): SupportedChatModelDefinition[] {
   const custom = readCustomModels();
   const overrides = new Map(custom.map(model => [model.id, model]));
   return [...chatGPT.models(), ...SUPPORTED_CHAT_MODELS.map(model => overrides.get(model.id) ?? model),
-    ...custom.filter(model => !SUPPORTED_CHAT_MODELS.some(base => base.id === model.id))];
+    ...custom.filter(model => !SUPPORTED_CHAT_MODELS.some(base => base.id === model.id))].map(model => ({ ...model, ...resolveContextWindow(model.id, { provider: model.provider }) }));
 }
 
 export function findModel(modelId: string): SupportedChatModelDefinition | undefined {

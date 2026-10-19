@@ -5,6 +5,10 @@ import type { ChatGPTService } from "../chatgpt";
 import { requireCompletedChatGPTStream } from "./chatgpt-stream";
 
 const unsupported = ["background", "conversation", "max_output_tokens", "max_tool_calls", "metadata", "moderation", "multi_agent", "prompt", "prompt_cache_retention", "safety_identifier", "temperature", "top_logprobs", "top_p", "truncation", "user", "previous_response_id"];
+export const CHATGPT_CONTEXT_OPTIONS = {
+    providerOptions: { openai: { store: false, systemMessageMode: "developer" } },
+    toolOptions: { openai: { namespace: { name: "myagent", description: "Ferramentas locais do My-Code-Agent, sujeitas a aprovações e sandbox." } } },
+};
 
 export function resolveChatGPTModel(id: string, service: ChatGPTService = chatGPT, fetcher: typeof fetch = fetch): ResolvedModel {
     const clientId = service.activeId();
@@ -35,7 +39,6 @@ export function resolveChatGPTModel(id: string, service: ChatGPTService = chatGP
     return {
         model: createOpenAI({ apiKey: "oauth-managed", fetch: request }).responses(id.slice("chatgpt:".length)),
         provider: "chatgpt", modelId: id, maxRetries: 0, abortSignal: connectionSignal,
-        providerOptions: { openai: { store: false, systemMessageMode: "developer" } },
-        toolOptions: { openai: { namespace: { name: "myagent", description: "Ferramentas locais do My-Code-Agent, sujeitas a aprovações e sandbox." } } },
+        ...CHATGPT_CONTEXT_OPTIONS,
     };
 }

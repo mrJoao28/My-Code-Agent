@@ -10,6 +10,7 @@ export type ResolvedModel = {
   toolOptions?: ProviderOptions;
   maxRetries?: number;
   contextWindow?: number;
+  contextWindowEstimated?: boolean;
   abortSignal?: AbortSignal;
 };
 

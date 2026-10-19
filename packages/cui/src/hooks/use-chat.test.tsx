@@ -59,6 +59,22 @@ test.each(["done", "error", "interrupt", "eof"])("session token accounting handl
 });
 
 
+test("context budget errors with a saved message id are errors, never interrupted or pending resume", async () => {
+    const message = "CONTEXT_MESSAGE_TOO_LARGE: A janela de 1024 tokens (estimada) não comporta 12 ferramentas. Configure contextWindow.";
+    const events = [{ type: "generation-started", messageId: "context-error" }, { type: "error", kind: "context", messageId: "context-error", message, parts: [] }];
+    const response = new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(""));
+    const client = { chat: { ":sessionId": { $post: async () => response } } } as unknown as typeof appClient;
+    let chat!: ReturnType<typeof useChat>;
+    function Harness() { chat = useChat("s", [], client); return <text>fixture</text>; }
+    let ui!: Awaited<ReturnType<typeof testRender>>;
+    try {
+        await act(async () => { ui = await testRender(<Harness />, { width: 60, height: 4 }); });
+        await act(async () => { await chat.submit({ userText: "olá", mode: "BUILD", model: "fixture" }); });
+        expect(chat.messages.at(-1)).toMatchObject({ id: "context-error", role: "error", content: message });
+        expect(chat.pendingResume).toBeNull(); expect(chat.streaming.status).toBe("idle");
+    } finally { await act(async () => { ui?.renderer.destroy(); }); }
+});
+
 test.each(["user", "interrupted"])("reload with pending %s asks before making any provider request", async kind => {
     let calls = 0;
     const client = { chat: { ":sessionId": { resume: { $post: async () => {
