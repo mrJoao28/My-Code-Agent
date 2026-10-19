@@ -9,6 +9,7 @@ export async function main(args = process.argv.slice(2)) {
     const options = parseOptions(args);
     if (options.command === "version") { console.log(version); return; }
     if (options.command === "help") { console.log(HELP); return; }
+    if (options.command === "exec") { const { runExec } = await import("./exec"); process.exitCode = await runExec(options); return; }
     const { loadGlobalConfig } = await import("../../server/src/lib/env");
     loadGlobalConfig();
     if (options.command === "doctor") { const { doctor } = await import("./doctor"); await doctor(); return; }

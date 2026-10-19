@@ -26,7 +26,8 @@ export function secureTools<T extends ToolSet>(tools: T, cwd: string, mode: "PLA
         secured[name] = { ...definition, execute: (input, options) => {
             const run = async () => {
                 const args = toolCallArgsSchema.parse(structuredClone(input));
-                const decision = toolDecision(name, mode, security.sandboxAvailable ?? isDockerAvailable());
+                const manager = security.manager ?? approvals;
+                const decision = toolDecision(name, mode, security.sandboxAvailable ?? isDockerAvailable(), manager.automationPolicy(sessionId));
                 if (decision === "deny") throw new PermissionDeniedError("Ferramenta não permitida: " + name);
                 options.abortSignal?.throwIfAborted();
                 await (security.authorize ?? authorizeWorkspace)(cwd);

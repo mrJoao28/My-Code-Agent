@@ -31,8 +31,17 @@ myagent
 | `myagent resume` | Escolhe uma sessão da pasta |
 | `myagent resume --all` | Lista sessões de todas as pastas |
 | `myagent doctor` | Verifica Bun, diretório de dados, SQLite e Docker |
+| `myagent exec "prompt"` | Executa sem interface, em uma sessão nova |
 | `myagent --help` | Ajuda |
 | `myagent --version` | Versão sem abrir banco ou servidor |
+
+`exec` aceita `--mode plan|build`, `--model ID`, `--json` e
+`--approve none|reads|all`. O padrão PLAN/none permite leituras locais e nega
+escritas, rede e comandos. `reads` também permite busca e leitura web; `all`
+autoriza ações desta execução, inclusive escritas, exclusões e commits. PLAN
+continua sem escrita e comandos sempre exigem Docker. A resposta final vai para
+stdout; `--json` usa eventos JSONL e termina com `exec-result`. Códigos: 0 sucesso,
+1 falha, 3 aprovação negada e 130 cancelamento. Não solicita interação na CUI.
 
 Use `/models` para selecionar/configurar um modelo e `/agents` ou Tab para
 alternar PLAN/BUILD. Durante a geração, a indicação de execução mantém o modo
@@ -59,7 +68,8 @@ avisa e omite `bash`, `type_check` e `test_run`. Os comandos do modelo executam
 somente em Docker, sem fallback no host, sem rede e com snapshot somente leitura.
 A imagem padrão é `oven/bun:1.3.13`; `MYAGENT_SANDBOX_IMAGE` permite outra imagem
 de confiança com as ferramentas e dependências necessárias. O pull acontece na primeira execução que precisar da imagem. Esses comandos
-isolados dispensam aprovação; bash fica disponível só em BUILD. A imagem padrão
+isolados dispensam aprovação na CUI; em `exec` exigem `--approve all`.
+Bash fica disponível só em BUILD. A imagem padrão
 não inclui automaticamente as dependências de seu projeto. Para copiar
 `node_modules`/`.venv` já instalados, use `MYAGENT_SANDBOX_DEPENDENCIES=1`;
 eles permanecem somente leitura, filtrados e precisam ser compatíveis com Linux.

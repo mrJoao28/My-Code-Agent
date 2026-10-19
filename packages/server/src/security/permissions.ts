@@ -4,15 +4,23 @@ import type { ChatStreamEvent } from "@myagent/shared";
 export type ApprovalEvent = Extract<ChatStreamEvent, { type: "approval-required" }>;
 export class PermissionDeniedError extends Error {}
 export type ApprovalGrant = { choice: "once" | "session" | "cached"; scope?: string };
+export type AutomationApproval = "none" | "reads" | "all";
+export function automationApproves(policy: AutomationApproval, name: string): boolean {
+    return policy === "all" || policy === "reads" && ["web_search", "web_fetch"].includes(name);
+}
 type RequestScope = { key: string; label: string; allowSession: boolean; toolCallId?: string };
 export class ApprovalManager {
+    private readonly automation = new Map<string, AutomationApproval>();
+    setAutomation(sessionId: string, policy: AutomationApproval) { this.forget(sessionId); this.automation.set(sessionId, policy); }
+    automationPolicy(sessionId: string) { return this.automation.get(sessionId); }
     private readonly grants = new Map<string, Set<string>>();
     forget(sessionId: string) {
+        this.automation.delete(sessionId);
         this.grants.delete(sessionId);
         for (const pending of this.pending.values()) if (pending.sessionId === sessionId) pending.settle(false);
     }
     sessions() { return [...this.grants.keys()]; }
-    private readonly pending = new Map<string, { sessionId: string; allowSession: boolean; settle: (approved: boolean, remember?: boolean) => void }>();
+    private readonly pending = new Map<string, { sessionId: string; toolName: string; allowSession: boolean; settle: (approved: boolean, remember?: boolean) => void }>();
     request(sessionId: string, toolName: string, args: ApprovalEvent["args"], notify: ((event: ApprovalEvent) => Promise<void>) | undefined, signal?: AbortSignal, timeoutMs = 120_000, scope?: RequestScope): Promise<ApprovalGrant> {
         if (signal?.aborted) return Promise.reject(new PermissionDeniedError("Ação cancelada"));
         const allowSession = !!scope?.allowSession && !["git_commit", "delete_file"].includes(toolName);
@@ -36,7 +44,7 @@ export class ApprovalManager {
             };
             const onAbort = () => finish(false);
             const timer = setTimeout(onAbort, timeoutMs);
-            this.pending.set(approvalId, { sessionId, allowSession, settle: finish });
+            this.pending.set(approvalId, { sessionId, toolName, allowSession, settle: finish });
             signal?.addEventListener("abort", onAbort, { once: true });
             void notify({ type: "approval-required", approvalId, toolName, args, ...(scope && { scope: scope.label, allowSession, toolCallId: scope.toolCallId }) }).catch(() => finish(false));
         });
@@ -44,7 +52,8 @@ export class ApprovalManager {
     decide(sessionId: string, approvalId: string, approved: boolean, remember = false): boolean {
         const entry = this.pending.get(approvalId);
         if (!entry || entry.sessionId !== sessionId || remember && (!approved || !entry.allowSession)) return false;
-        entry.settle(approved, remember);
+        const policy = this.automation.get(sessionId);
+        entry.settle(approved && (policy === undefined || automationApproves(policy, entry.toolName)), remember && policy === undefined);
         return true;
     }
 }
@@ -53,9 +62,9 @@ const READ_TOOLS = new Set(["read_file", "read_files", "project_inspect", "file_
 const APPROVAL_TOOLS = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "git_commit", "web_search", "web_fetch"]);
 const BUILD_TOOLS = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "bash", "git_commit"]);
 const SANDBOX_TOOLS = new Set(["bash", "type_check", "test_run"]);
-export function toolDecision(name: string, mode: "PLAN" | "BUILD", sandboxAvailable = false): "allow" | "approve" | "deny" {
+export function toolDecision(name: string, mode: "PLAN" | "BUILD", sandboxAvailable = false, automation?: AutomationApproval): "allow" | "approve" | "deny" {
     if (mode === "PLAN" && BUILD_TOOLS.has(name)) return "deny";
-    if (SANDBOX_TOOLS.has(name)) return sandboxAvailable ? "allow" : "deny";
+    if (SANDBOX_TOOLS.has(name)) return sandboxAvailable ? automation === undefined ? "allow" : "approve" : "deny";
     if (READ_TOOLS.has(name)) return "allow";
     return APPROVAL_TOOLS.has(name) ? "approve" : "deny";
 }

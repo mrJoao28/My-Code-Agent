@@ -22,6 +22,7 @@ import { cancelAllGenerations } from "./services/stream-service";
 import { loadGlobalConfig } from "./lib/env";
 import { checkDocker, setDockerAvailable, isDockerAvailable } from "./security/sandbox";
 import { chatGPT } from "./lib/chatgpt";
+import { approvals, type AutomationApproval } from "./security/permissions";
 declare const MYAGENT_BUNDLED: boolean;
 
 export function createApp(token: string, leases?: SessionLeases) {
@@ -118,7 +119,8 @@ return routes;
 
 export type AppType = ReturnType<typeof createApp>;
 
-export async function startServer(options: { port?: number; token: string; workspace: string; sessionId?: string; onLockLost?: () => void; dockerAvailable?: boolean; signal?: AbortSignal; development?: boolean }) {
+export async function startServer(options: { port?: number; token: string; workspace: string; sessionId?: string; automationApproval?: AutomationApproval; onLockLost?: () => void; dockerAvailable?: boolean; signal?: AbortSignal; development?: boolean }) {
+  if (options.automationApproval !== undefined && !options.sessionId) throw new Error("Automação exige uma sessão explícita.");
   const workspace = await workspaceTitle(options.workspace);
   const docker = options.dockerAvailable ?? await checkDocker(options.signal);
   setDockerAvailable(docker);
@@ -133,6 +135,7 @@ export async function startServer(options: { port?: number; token: string; works
       await validateSessionWorkspace(session, workspace);
       await leases.acquire(options.sessionId);
     }
+    if (options.automationApproval !== undefined) approvals.setAutomation(options.sessionId!, options.automationApproval);
     const app = createApp(options.token, leases);
     const server = Bun.serve({ hostname: "127.0.0.1", port: options.port ?? 0, fetch: app.fetch, idleTimeout: 255 });
     setChatSessionLeases(leases);
@@ -145,11 +148,11 @@ export async function startServer(options: { port?: number; token: string; works
           stopCleanup?.();
           chatGPT.cancelLogin();
           try { await cancelAllGenerations(); await server.stop(true); }
-          finally { await leases.close(); setChatSessionLeases(undefined); setRuntimeWorkspace(undefined); setDockerAvailable(false); }
+          finally { if (options.automationApproval !== undefined) approvals.forget(options.sessionId!); await leases.close(); setChatSessionLeases(undefined); setRuntimeWorkspace(undefined); setDockerAvailable(false); }
         })();
       },
     };
-  } catch (error) { stopCleanup?.(); await leases.close(); setRuntimeWorkspace(undefined); throw error; }
+  } catch (error) { if (options.automationApproval !== undefined) approvals.forget(options.sessionId!); stopCleanup?.(); await leases.close(); setRuntimeWorkspace(undefined); throw error; }
 }
 
 if (import.meta.main && (typeof MYAGENT_BUNDLED === "undefined" || !MYAGENT_BUNDLED)) {

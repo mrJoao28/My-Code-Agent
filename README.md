@@ -2,6 +2,37 @@
 
 Assistente de programação no terminal, com Bun, React/OpenTUI, Hono, AI SDK e Prisma/SQLite local. O comando `myagent` abre o agente na pasta atual e retoma a sessão mais recente daquele workspace.
 
+## Automação sem interface
+
+```sh
+myagent exec "Leia README.md e resuma o projeto"
+myagent exec "Corrija o bug descrito" --mode build --model gpt-5.4 --approve all
+myagent exec "Leia src/index.ts" --json --approve none
+```
+
+`exec` usa uma sessão nova e mantém autenticação privada, workspace, locks,
+persistência e checkpoints. O padrão é `--mode plan --approve none`: leituras
+locais são permitidas; comandos, escritas e rede são negados. `--approve reads`
+também autoriza `web_search` e `web_fetch`. `--approve all` autoriza cada ação
+da execução, inclusive escritas, exclusões e commits; use somente quando isso
+for desejado. PLAN continua sem ferramentas de escrita e comandos continuam
+exclusivos do Docker. Não há fallback para execução no host.
+
+Sem `--json`, a resposta final vai para stdout e erros para stderr. Com `--json`,
+stdout contém eventos JSONL do streaming e um último evento `exec-result`, com
+texto final, status, sessão, modelo, tokens, chamadas e duração. Fechar a conexão
+sem evento `done` é falha. Códigos de saída: **0** sucesso, **1** falha,
+**3** aprovação negada e **130** cancelamento. Qualquer negação mantém a saída 3,
+mesmo quando o modelo conclui uma explicação. Nenhum modo abre a CUI ou solicita
+resposta interativa para aprovações.
+
+Para medir qualidade com chamadas reais e pagas, execute
+`bun run eval --model gpt-5.4 --model gpt-5.4-mini` no checkout. As nove
+tarefas e os limites da comparação estão em [evals/README.md](evals/README.md).
+As avaliações não rodam no CI padrão.
+`bun run eval --simulate` valida o pipeline sem consumo de tokens ou inferência;
+os perfis e tokens são fictícios e o relatório identifica a simulação.
+
 ## Instalação
 
 A instalação global usa **Node.js >= 22 e npm**. O agente executa com

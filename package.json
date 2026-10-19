@@ -9,9 +9,11 @@
     "dev:server": "bun run --hot packages/server/src/index.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/database/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/cui/tsconfig.json && tsc --noEmit -p packages/myagent/tsconfig.json",
+    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/database/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/cui/tsconfig.json && tsc --noEmit -p packages/myagent/tsconfig.json && tsc --noEmit -p evals/tsconfig.json",
     "test:integration": "bun scripts/test-integration.ts",
-    "test:database": "bun test packages/database/src"
+    "test:database": "bun test packages/database/src",
+    "eval": "bun evals/runner.ts",
+    "typecheck:eval": "tsc --noEmit -p evals/tsconfig.json"
   },
   "devDependencies": {
     "@myagent/cui": "workspace:*",

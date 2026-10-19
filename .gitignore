@@ -36,3 +36,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .DS_Store
 
 /generated/prisma
+
+# Resultados locais de avaliações reais (fora do CI padrão)
+/evals/results/

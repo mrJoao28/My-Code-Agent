@@ -10,6 +10,28 @@ import { createTools } from "../tools";
 import { execute, withFixture } from "../test-support";
 
 describe("Tool permissions", () => {
+    test("automation is session-scoped, restricts Docker auto-allow and cannot bypass PLAN or missing sandbox", async () => {
+        const manager = new ApprovalManager();
+        manager.setAutomation("strict", "none");
+        for (const policy of ["none", "reads", "all"] as const) {
+            expect(toolDecision("bash", "BUILD", true, policy)).toBe("approve");
+            expect(toolDecision("type_check", "PLAN", true, policy)).toBe("approve");
+            expect(toolDecision("bash", "PLAN", true, policy)).toBe("deny");
+            expect(toolDecision("bash", "BUILD", false, policy)).toBe("deny");
+        }
+        let event!: ApprovalEvent;
+        const pending = manager.request("strict", "bash", {}, async value => { event = value; });
+        const denied = pending.catch(error => error);
+        expect(manager.decide("strict", event.approvalId, true)).toBe(true);
+        expect(await denied).toBeInstanceOf(PermissionDeniedError);
+        expect(manager.automationPolicy("other")).toBeUndefined();
+        manager.forget("strict");
+        expect(manager.automationPolicy("strict")).toBeUndefined();
+        manager.setAutomation("reads", "reads");
+        const web = manager.request("reads", "web_fetch", {}, async value => { event = value; });
+        manager.decide("reads", event.approvalId, true);
+        expect((await web).choice).toBe("once");
+    });
     test("classifies known tools and denies unknown tools by default", () => {
         expect(toolDecision("read_file", "PLAN")).toBe("allow");
         expect(toolDecision("bash", "PLAN")).toBe("deny");
