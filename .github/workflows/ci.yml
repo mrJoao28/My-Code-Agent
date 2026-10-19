@@ -17,10 +17,48 @@ jobs:
         with:
           bun-version: 1.3.13
       - run: bun install --frozen-lockfile --ignore-scripts
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
       - run: bun run --cwd packages/database db.generate
       - run: bun run typecheck
       - run: bun test
       - run: bun run build
+  package:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run build
+      - name: Instalar e verificar o tarball fora do workspace
+        shell: pwsh
+        run: ./scripts/package-smoke.ps1
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Auditoria de dependências (aviso)
+        id: audit
+        continue-on-error: true
+        run: bun audit
+      - name: Sinalizar problemas encontrados pela auditoria
+        if: steps.audit.outcome == 'failure'
+        run: echo "::warning::bun audit encontrou vulnerabilidades ou não conseguiu consultar o registro; confira o log da auditoria."
   sandbox:
     runs-on: ubuntu-latest
     steps:

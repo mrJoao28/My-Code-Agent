@@ -1,15 +1,16 @@
 # CLI global com Bun e SQLite
 
-O pacote é `my-code-agent`, versão inicial `0.1.0`, e instala o comando `myagent`.
-O runtime necessário é Bun >= 1.3.13. O pacote ainda precisa ser publicado pelo
-mantenedor; nenhuma publicação faz parte desta mudança.
+O pacote é `@j2008/my-code-agent` e instala o comando `myagent`.
+A versão publicada vem de `packages/myagent/package.json`.
+O agente executa com Bun >= 1.3.13. A entrada global usa Node.js >= 22 e npm;
+o npm não instala o runtime Bun.
 
 ## Uso
 
-Após publicar:
+Com o pacote disponível no npm:
 
 ```sh
-npm i -g my-code-agent
+npm i -g @j2008/my-code-agent
 cd caminho/do/projeto
 myagent
 ```
@@ -71,7 +72,8 @@ type_check e test_run da lista real de ferramentas. PLAN continua sem mutações
 
 A imagem padrão é `oven/bun:1.3.13`; altere `MYAGENT_SANDBOX_IMAGE` para uma
 imagem de confiança com compiladores e dependências do projeto. O pull acontece
-somente após aprovação da primeira ferramenta que precisar dela. Uma falha de
+na primeira execução que precisar dela. Comandos isolados dispensam aprovação;
+bash continua indisponível em PLAN. Uma falha de
 rede é explicada sem executar comandos no host. A imagem padrão contém Bun;
 ela não contém automaticamente as dependências de cada projeto nem tsc.
 
@@ -108,7 +110,7 @@ no Prisma 7, --to-schema substitui o antigo --to-schema-datamodel.
 Para testar em uma pasta temporária com espaços no Windows, ajuste caminhos:
 
 ```powershell
-npm i -g --prefix 'C:/temp/myagent install' --package-lock=false ./my-code-agent-0.1.0.tgz
+npm i -g --prefix 'C:/temp/myagent install' --package-lock=false ./j2008-my-code-agent-0.1.1.tgz
 $env:MYAGENT_HOME='C:/temp/myagent home'
 Set-Location 'C:/temp/projeto com espaços'
 & 'C:/temp/myagent install/myagent.cmd' --version
@@ -117,8 +119,37 @@ Set-Location 'C:/temp/projeto com espaços'
 ```
 
 No POSIX, o executável fica em `<prefix>/bin/myagent`. Bun precisa estar no
-PATH; no Windows, o shim `.cmd` criado pelo npm o utiliza pelo shebang.
-Não use target Node nem `bun build --compile` neste fluxo.
+PATH. O bin `bin/myagent.js` tem shebang Node (requer >= 22), procura Bun e
+executa `dist/cli.js`, herdando terminal, argumentos e código de saída. Sem Bun,
+termina com código 1 e informa https://bun.sh. No Windows, o shim `.cmd` do npm
+inicia essa entrada Node. O bundle continua target Bun, sem `bun build --compile`.
+
+## CI e publicação por tag
+
+`bun run build` gera os três bundles. `pwsh -File scripts/package-smoke.ps1`
+empacota sem repetir o build, confere a lista exata de seis arquivos (manifest,
+README, entrada Node e três bundles), instala com npm global sem Bun no PATH em
+prefixo temporário com espaços e usa `MYAGENT_HOME` temporário. Fora do workspace, verifica versão,
+`doctor` e a mensagem sem Bun no PATH. O script limpa só seu diretório temporário.
+O job `package` executa esse fluxo em Ubuntu e Windows.
+
+O workflow `release.yml` aceita tags `v*`, exige igualdade exata entre tag
+`v<versão>` e versão do pacote, instala com `bun install --frozen-lockfile`,
+compila, verifica tipos/testes/instalação e executa
+`npm publish --provenance --access public`. Usa `id-token: write`, Node 24 e
+OIDC. Antes da primeira tag, cadastre no npm um Trusted Publisher GitHub Actions:
+owner `mrJoao28`, repositório `My-Code-Agent`, arquivo `release.yml`, permitindo
+`npm publish`. O pacote precisa existir para cadastrar o publisher; se necessário,
+a primeira publicação é manual. Não crie tags de release sem querer publicar.
+Veja [Trusted Publishers](https://docs.npmjs.com/trusted-publishers/).
+
+`.github/dependabot.yml` agenda revisões semanais de Bun e GitHub Actions.
+Essa configuração não ativa sozinha os alertas: no GitHub, abra Settings →
+Advanced Security → Dependabot alerts → Enable. Ative também security updates
+se desejar PRs corretivos. É necessário acesso de administrador; veja a
+[configuração oficial dos alertas](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/configure-dependabot-alerts).
+O CI executa `bun audit` como aviso; falhas de consulta e vulnerabilidades ficam
+visíveis no log, sem bloquear os demais checks.
 
 ## Publicação manual
 

@@ -4,14 +4,16 @@
   "type": "module",
   "description": "Assistente de programação no terminal. Requer Bun; Docker é opcional para comandos isolados.",
   "bin": {
-    "myagent": "dist/cli.js"
+    "myagent": "bin/myagent.js"
   },
   "files": [
+    "bin/myagent.js",
     "dist/cli.js",
     "dist/grep-worker.js",
     "dist/source-worker.js"
   ],
   "engines": {
+    "node": ">=22",
     "bun": ">=1.3.13"
   },
   "license": "MIT",

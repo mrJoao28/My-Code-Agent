@@ -1,11 +1,25 @@
 ﻿# My-Code-Agent
 
 Assistente de programação no terminal, com servidor local e SQLite embutidos.
-Requer **Bun >= 1.3.13 no PATH**, inclusive ao instalar com npm.
+A instalação usa **Node.js >= 22 e npm**. O agente requer **Bun >= 1.3.13
+no PATH**, inclusive ao instalar com npm. Instale em [bun.sh](https://bun.sh):
+
+```sh
+# Linux/macOS
+curl -fsSL https://bun.sh/install | bash
+```
+
+```powershell
+# Windows
+powershell -c "irm bun.sh/install.ps1 | iex"
+```
+
+Abra outro terminal e confirme `bun --version`. A entrada Node mostra como
+instalar Bun se ele estiver ausente; não instala o runtime automaticamente.
 Não requer PostgreSQL nem dois terminais.
 
 ```sh
-npm i -g my-code-agent
+npm i -g @j2008/my-code-agent
 cd meu-projeto
 myagent
 ```
@@ -44,9 +58,12 @@ Docker é opcional para abrir a CUI e conversar. Sem daemon ativo, a interface
 avisa e omite `bash`, `type_check` e `test_run`. Os comandos do modelo executam
 somente em Docker, sem fallback no host, sem rede e com snapshot somente leitura.
 A imagem padrão é `oven/bun:1.3.13`; `MYAGENT_SANDBOX_IMAGE` permite outra imagem
-de confiança com as ferramentas e dependências necessárias. O pull só acontece
-após aprovação da ferramenta. A imagem padrão não inclui automaticamente as
-dependências de seu projeto.
+de confiança com as ferramentas e dependências necessárias. O pull acontece na primeira execução que precisar da imagem. Esses comandos
+isolados dispensam aprovação; bash fica disponível só em BUILD. A imagem padrão
+não inclui automaticamente as dependências de seu projeto. Para copiar
+`node_modules`/`.venv` já instalados, use `MYAGENT_SANDBOX_DEPENDENCIES=1`;
+eles permanecem somente leitura, filtrados e precisam ser compatíveis com Linux.
+`MYAGENT_SANDBOX_TMPFS_MIB` ajusta `/tmp` (64 MiB por padrão).
 
 No Windows, o npm cria `myagent.cmd`. Mantenha Bun e o diretório global do npm
 no PATH. Se PowerShell bloquear `npm.ps1`, use `npm.cmd`.
@@ -54,8 +71,34 @@ OpenTUI e libsql instalam binários nativos por plataforma; preserve as dependê
 opcionais (não use `--omit=optional`). Uma plataforma sem binário compatível não
 é suportada; reinstalar não cria suporte a ela.
 
-A validação desta preparação foi feita em Windows com Bun 1.3.13 e IA simulada
-localmente, sem chamadas pagas. Linux/macOS, Docker real e modelos reais não foram
-validados nesta preparação. Testes simulados não garantem compatibilidade com
-qualquer modelo, imagem Docker ou plataforma. O código-fonte precisa de Bun;
-não há target Node nem executável compilado independente.
+## Segurança, privacidade e limites
+
+PLAN não altera arquivos do projeto. BUILD pede aprovação para escritas e rede;
+Y permite uma vez, A permite na sessão e no escopo exibido, N nega. Exclusões e
+commits sempre pedem aprovação individual. `/undo` restaura o último passo de
+arquivo se não houver conflito, a partir de checkpoints locais, sem commits.
+
+O provedor selecionado recebe pedidos, instruções AGENTS.md, histórico que couber
+no contexto e resultados de ferramentas: arquivos lidos, diffs, caminhos e saídas.
+Não envie segredos. Ollama só mantém esse tráfego local se o endpoint configurado
+for local. Tavily recebe consultas de busca; sites consultados recebem URL e IP
+de origem. Chaves são mascaradas na CUI, mas salvas sem criptografia própria no
+perfil do usuário; no POSIX os arquivos privados usam modo 0600, no Windows
+proteja o diretório pelas ACLs.
+
+O login ChatGPT fica **desligado por padrão**. Somente `MYAGENT_ENABLE_CHATGPT=1`
+habilita o fluxo OAuth no navegador; os tokens da conta ficam no diretório global.
+Essa integração pode depender de plano/permissões e mudar com o provedor.
+Consulte [dados enviados e login ChatGPT](https://github.com/mrJoao28/My-Code-Agent#dados-enviados-e-login-chatgpt)
+antes de habilitar ou enviar código privado.
+
+Gerações interrompidas são mostradas ao reabrir e a CUI pergunta antes de retomar
+ou gastar tokens. Um efeito iniciado pode ter desfecho desconhecido: inspecione
+antes de repetir. Sessões inativas têm retenção de 90 dias com aviso prévio;
+`MYAGENT_SESSION_RETENTION_DAYS=0` desliga a exclusão automática.
+
+O CI verifica instalação no Linux e Windows; macOS não tem essa verificação.
+A CUI exige terminal interativo e binários OpenTUI/libsql compatíveis. Não há
+executável independente de Bun. A sandbox não instala dependências pela rede;
+dependências nativas precisam corresponder ao Linux da imagem. Provedores podem
+cobrar pelo uso; os testes do projeto usam IA simulada, sem chamadas pagas.

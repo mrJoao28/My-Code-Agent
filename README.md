@@ -4,9 +4,21 @@ Assistente de programação no terminal, com Bun, React/OpenTUI, Hono, AI SDK e 
 
 ## Instalação
 
-Requer **Bun >= 1.3.13** disponível no PATH. Instale o Bun seguindo https://bun.sh.
+A instalação global usa **Node.js >= 22 e npm**. O agente executa com
+**Bun >= 1.3.13** no PATH; o npm não instala Bun. Siga [bun.sh](https://bun.sh)
+ou use o comando correspondente ao seu sistema:
 
-Após a publicação do pacote no npm:
+```sh
+# Linux/macOS
+curl -fsSL https://bun.sh/install | bash
+```
+
+```powershell
+# Windows (PowerShell)
+powershell -c "irm bun.sh/install.ps1 | iex"
+```
+
+Abra um novo terminal e confirme `bun --version`. Depois:
 
 ```sh
 npm i -g @j2008/my-code-agent
@@ -14,7 +26,7 @@ cd meu-projeto
 myagent
 ```
 
-O pacote usa `#!/usr/bin/env bun`; npm instala o comando, mas não instala o runtime Bun. No Windows, o npm cria o shim `myagent.cmd`. A pasta de executáveis globais do npm precisa estar no PATH.
+O comando de entrada usa Node e procura Bun no PATH. Se Bun faltar, explica como instalar e termina com código 1. No Windows, o npm cria o shim `myagent.cmd`; se PowerShell bloquear `npm.ps1`, use `npm.cmd`. A pasta de executáveis globais do npm precisa estar no PATH. Preserve as dependências opcionais: OpenTUI e libsql usam binários específicos da plataforma.
 
 **Docker é opcional para abrir o aplicativo.** Sem Docker ativo, a interface avisa que os comandos estão desativados. Shell, typecheck e execução de testes exigem Docker e sandbox, sem aprovação por chamada. Shell continua indisponível em PLAN; alterações no projeto e rede exigem aprovação. Não existe fallback no host.
 
@@ -117,6 +129,22 @@ os arquivos. `models.json` precisa ser JSON válido e passar pelo schema de mode
 em caso de corrupção o aplicativo informa o erro e preserva o arquivo para correção,
 em vez de assumir um catálogo vazio.
 
+## Limites conhecidos
+
+O runtime do agente continua sendo Bun; a entrada Node apenas verifica e inicia
+esse runtime. Não há executável independente. As verificações de instalação no CI
+cobrem Linux e Windows; macOS não tem esse job. OpenTUI/libsql exigem binários
+compatíveis com a plataforma e um terminal interativo para a CUI. `--version` e
+`doctor` funcionam sem terminal interativo ou chave de IA; `doctor` cria/migra o
+SQLite no diretório global configurado.
+
+A sandbox não instala dependências pela rede e dependências nativas copiadas do
+Windows podem não funcionar no container Linux. Uma falha abrupta durante uma
+escrita pode deixar o resultado desconhecido; confira o arquivo antes de repetir
+a ação. O contexto enviado ao modelo pode ser resumido/abreviado, embora os
+resultados completos permaneçam no histórico local. Chamadas reais a provedores
+podem ter custo e dependem das condições do serviço.
+
 ## Desenvolvimento
 
 Use o workspace da raiz e Bun:
@@ -149,5 +177,16 @@ O servidor de desenvolvimento usa loopback e porta 3000. A CUI aceita `API_URL`.
 PLAN continua sem ferramentas que alterem o código. BUILD exige aprovação para alterações e rede; processos só executam na sandbox Docker. Uma tarefa comum não cria documentação automaticamente. A API recusa clientes de navegador, exige token privado e valida o workspace da sessão antes de carregá-la ou continuar uma geração.
 
 As migrations antigas do PostgreSQL estão arquivadas em `packages/database/prisma/migrations-postgres-legacy/`. Dados antigos do PostgreSQL **não são importados**; bancos e volumes existentes não são apagados.
+
+O CI instala o tarball em diretório temporário no Linux/Windows e verifica o
+conteúdo publicável, `--version`, `doctor` e Bun ausente. `bun audit` roda como
+aviso, sem bloquear o CI. O Dependabot acompanha Bun e GitHub Actions; os alertas
+de segurança precisam estar habilitados nas configurações do repositório.
+
+A publicação é acionada por tag `v<versão>` igual à versão de
+`packages/myagent/package.json`, com OIDC e provenance. Configure previamente o
+Trusted Publisher npm para `mrJoao28/My-Code-Agent`, workflow `release.yml`.
+Nenhum token npm de longa duração é necessário nesse fluxo. Veja a
+[documentação npm sobre Trusted Publishers](https://docs.npmjs.com/trusted-publishers/).
 
 Consulte [instalação, empacotamento e publicação](docs/CLI_GLOBAL.md), [segurança e testes](docs/SEGURANCA_E_TESTES.md) e [análise técnica](docs/ANALISE_PROJETO.md).

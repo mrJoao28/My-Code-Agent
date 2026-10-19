@@ -60,7 +60,7 @@
       "name": "@j2008/my-code-agent",
       "version": "0.1.1",
       "bin": {
-        "myagent": "dist/cli.js",
+        "myagent": "bin/myagent.js",
       },
       "dependencies": {
         "@libsql/client": "^0.15.15",
