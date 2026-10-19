@@ -14,6 +14,7 @@ import { createGitStatusTool } from "./git-status";
 import { createGitDiffTool } from "./git-diff";
 import { createGitLogTool } from "./git-log";
 import { createGitCommitTool } from "./git-commit";
+import { createGitInitTool, createGitSwitchTool, createGitRemoteAddTool, createGitPushTool, createGitSyncTool } from "./git-workflow";
 import { createTypeCheckTool } from "./type-check";
 import { createDeleteFileTool } from "./delete-file";
 import { createMoveFileTool } from "./move-file";
@@ -71,6 +72,11 @@ export function createTools(cwd: string, mode: Mode, sessionId: string, security
         move_file: createMoveFileTool(cwd),
         apply_patch: createApplyPatchTool(cwd),
         ...(processesEnabled && { bash: createBashTool(cwd, sessionId) }),
-        git_commit: createGitCommitTool(cwd)
+        git_commit: createGitCommitTool(cwd),
+        git_init: createGitInitTool(cwd),
+        git_switch: createGitSwitchTool(cwd),
+        git_remote_add: createGitRemoteAddTool(cwd),
+        git_push: createGitPushTool(cwd),
+        git_sync: createGitSyncTool(cwd)
     }, instructions), cwd, mode, sessionId, security);
 }

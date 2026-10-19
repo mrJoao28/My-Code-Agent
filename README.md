@@ -18,6 +18,40 @@ da execução, inclusive escritas, exclusões e commits; use somente quando isso
 for desejado. PLAN continua sem ferramentas de escrita e comandos continuam
 exclusivos do Docker. Não há fallback para execução no host.
 
+Mensagens aceitam até **9.000 caracteres**, na CUI, na API e em `exec`.
+Push exige também `--allow-push`, junto de `--mode build --approve all`.
+A flag só permite branches de trabalho; `main`/`master` precisam da confirmação
+adicional na CUI e são recusadas pelo modo não interativo.
+
+## Fluxo Git com aprovação
+
+Em BUILD, `git_init` inicializa com `main` somente fora de outro repositório;
+`git_switch` cria ou troca de branch sem force/delete; `git_remote_add` adiciona
+uma URL HTTPS sem credenciais. O host permitido por padrão é `github.com`;
+configure `MYAGENT_GIT_ALLOWED_HOSTS=github.com,git.exemplo.com` no ambiente ou em
+`~/.myagent/config.env` para permitir outros hosts exatos (sem curingas).
+
+`git_commit` respeita a identidade local, ou lê somente `user.name` e `user.email`
+globais para passá-los ao comando. Se faltarem, configure `git config --global
+user.name "Seu nome"` e `git config --global user.email "voce@exemplo.com"`.
+O restante da configuração global permanece desabilitado nas operações Git.
+
+`git_push` mostra URL completa e branch e exige aprovação em cada chamada; init
+e remote_add também nunca permitem autorização por sessão. Em `main`/`master`,
+Y abre uma segunda confirmação e M autoriza explicitamente o envio. Não há force,
+delete, mirror ou push de tags. O transporte usa HTTPS e os credential helpers
+de sistema/global já instalados, sem prompt interativo, com hooks desligados e
+timeout de 60 segundos. Configure o acesso Git fora do agente se necessário;
+não coloque tokens na URL. Rewrites, proxies, headers e helpers locais do
+repositório são recusados para impedir mudança silenciosa de destino/credenciais.
+
+Após um push bem-sucedido, a geração termina informando a branch e aguardando que
+você libere o PR no GitHub e avise para continuar. Não cria PR nem inicia outra
+branch automaticamente. Após seu aviso, troque para a principal e aprove
+`git_sync`: fetch seguido de merge `--ff-only`, com workspace/staging limpos;
+divergências são reportadas sem resolução automática. Em pasta vazia, os arquivos
+pedidos são criados antes do primeiro commit. Não há commits automáticos.
+
 Sem `--json`, a resposta final vai para stdout e erros para stderr. Com `--json`,
 stdout contém eventos JSONL do streaming e um último evento `exec-result`, com
 texto final, status, sessão, modelo, tokens, chamadas e duração. Fechar a conexão

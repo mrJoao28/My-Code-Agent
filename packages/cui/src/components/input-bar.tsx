@@ -24,6 +24,7 @@ import { useTheme } from "../providers/theme";
 import { usePromptConfig } from "../providers/prompt-config";
 import { useKeyboardLayer } from "../providers/keyboard-layer";
 import { Mode } from "@myagent/database/enums";
+import { MAX_MESSAGE_LENGTH } from "@myagent/shared";
 
 const MAX_VISIBLE_MENTIONS = 8;
 const CURRENT_DIRECTORY = process.cwd();
@@ -795,6 +796,10 @@ export function InputBar({
       ).trim();
 
       if (text.length === 0) {
+        return;
+      }
+      if (text.length > MAX_MESSAGE_LENGTH) {
+        toast.show({ message: "A mensagem permite até 9.000 caracteres. Reduza o texto para enviar.", variant: "error" });
         return;
       }
 

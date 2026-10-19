@@ -5,6 +5,7 @@ import type { ChatStreamEvent } from "@myagent/shared";
 import { KeyboardLayerProvider, useKeyboardLayer } from "../providers/keyboard-layer";
 import { ApprovalPanel } from "./approval-panel";
 import { approvalPreview } from "./approval-preview";
+import { SESSION_APPROVAL_FORBIDDEN } from "@myagent/shared";
 
 type Approval = Extract<ChatStreamEvent, { type: "approval-required" }>;
 const approval = (toolName: string, args: Approval["args"]): Approval => ({ type: "approval-required", approvalId: "id", toolName, args, scope: "Caminhos: src/a.ts", allowSession: true });
@@ -17,6 +18,11 @@ const cases = [
     approval("move_file", { from: "src/a.ts", to: "src/b.ts" }),
     approval("delete_file", { path: "src/a.ts" }),
     approval("git_commit", { message: "fixture commit", files: ["src/a.ts"] }),
+    approval("git_init", {}),
+    approval("git_switch", { branch: "feature/x", create: true }),
+    approval("git_remote_add", { remote: "origin", url: "https://github.com/o/r" }),
+    approval("git_push", { remote: "origin", branch: "feature/x", url: "https://github.com/o/r" }),
+    approval("git_sync", { remote: "origin", branch: "main", url: "https://github.com/o/r" }),
 ];
 
 test.each(cases)("approval renders readable Portuguese preview for $toolName", async item => {
@@ -27,8 +33,26 @@ test.each(cases)("approval renders readable Portuguese preview for $toolName", a
         const frame = ui.captureCharFrame();
         expect(frame).toContain("Permitir uma vez"); expect(frame).toContain("Negar");
         for (const line of approvalPreview(item)) expect(frame).toContain(line.text);
-        if (["delete_file", "git_commit"].includes(item.toolName)) expect(frame).not.toContain("Permitir nesta sessão");
+        if (SESSION_APPROVAL_FORBIDDEN.includes(item.toolName)) expect(frame).not.toContain("Permitir nesta sessão");
         if (item.toolName === "write_file") expect(frame).toContain("4 bytes");
+    } finally { await act(async () => { ui?.renderer.destroy(); }); }
+});
+
+test("main push requires Y then explicit M; Enter and session approval cannot authorize it", async () => {
+    const item = { ...approval("git_push", { remote: "origin", branch: "main", url: "https://github.com/o/r" }), confirmation: "main" };
+    const decisions: unknown[] = [];
+    let ui!: Awaited<ReturnType<typeof testRender>>;
+    try {
+        await act(async () => { ui = await testRender(<KeyboardLayerProvider><ApprovalPanel approval={item} decide={async (...args) => { decisions.push(args); }} /></KeyboardLayerProvider>, { width: 130, height: 26 }); });
+        await act(async () => { ui.mockInput.pressEnter(); await ui.mockInput.typeText("a"); await ui.mockInput.typeText("m"); });
+        expect(decisions).toEqual([]);
+        await act(async () => { await ui.mockInput.typeText("y"); });
+        await ui.waitForFrame(frame => frame.includes("Confirmar envio direto para main"));
+        expect(decisions).toEqual([]);
+        await act(async () => { ui.mockInput.pressEnter(); });
+        expect(decisions).toEqual([]);
+        await act(async () => { await ui.mockInput.typeText("m"); });
+        expect(decisions).toEqual([["id", true, false, "main"]]);
     } finally { await act(async () => { ui?.renderer.destroy(); }); }
 });
 

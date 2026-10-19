@@ -61,3 +61,14 @@ test("session cannot be forged with assistant/error role or unsupported model", 
     } }) })).status).toBe(400);
     expect(session.create).toHaveBeenCalledTimes(0);
 });
+
+test("initial messages accept 9000 characters and reject 9001 before persistence", withFixture(async ({ cwd }) => {
+    const { app, session } = setup(path => authorizeWorkspace(path, [cwd]));
+    for (const length of [9000, 9001]) {
+        const response = await app.request("/session", { method: "POST", headers, body: JSON.stringify({ cwd, initialMessage: {
+            role: "USER", content: "x".repeat(length), mode: "PLAN", model: DEFAULT_CHAT_MODEL_ID,
+        } }) });
+        expect(response.status).toBe(length === 9000 ? 201 : 400);
+    }
+    expect(session.create).toHaveBeenCalledTimes(1);
+}), 15_000);

@@ -2,6 +2,7 @@ import { activeSessionGenerations, recoverOrphanedGenerations } from "../service
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
+import { messageContentSchema } from "@myagent/shared";
 import type { PrismaClient } from "@myagent/database";
 import { Mode } from "@myagent/database/enums";
 import { isSupportedChatModel } from "../lib/models";
@@ -12,7 +13,7 @@ import { loadSessionForUse } from "../services/session-lifecycle";
 import { fitContextWindow } from "../services/session-context";
 const createSessionSchema = z.object({
     title: z.string().trim().min(1).max(32768).optional(), cwd: z.string().min(1).optional(),
-    initialMessage: z.object({ role: z.literal("USER"), content: z.string().trim().min(1).max(100_000),
+    initialMessage: z.object({ role: z.literal("USER"), content: messageContentSchema,
         mode: z.enum(Mode), model: z.string().refine(isSupportedChatModel, "Unsupported model"),
     }).optional(),
 });

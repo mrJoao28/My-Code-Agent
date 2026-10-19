@@ -4,7 +4,7 @@ import { extractFullText } from "./message-format";
 
 export const activeSessionGenerations = new Set<string>();
 type Database = Pick<PrismaClient, "message">;
-const effects = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "git_commit", "bash"]);
+const effects = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "git_commit", "git_init", "git_switch", "git_remote_add", "git_push", "git_sync", "bash"]);
 function canonical(value: unknown): string {
     if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
     if (value && typeof value === "object") return "{" + Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => JSON.stringify(key) + ":" + canonical(item)).join(",") + "}";

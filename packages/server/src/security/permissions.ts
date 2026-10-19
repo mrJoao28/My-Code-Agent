@@ -1,29 +1,34 @@
 import { randomUUID } from "node:crypto";
 import type { ChatStreamEvent } from "@myagent/shared";
+import { SESSION_APPROVAL_FORBIDDEN } from "@myagent/shared";
 
 export type ApprovalEvent = Extract<ChatStreamEvent, { type: "approval-required" }>;
 export class PermissionDeniedError extends Error {}
-export type ApprovalGrant = { choice: "once" | "session" | "cached"; scope?: string };
+export type ApprovalGrant = { choice: "once" | "session" | "cached"; scope?: string; confirmation?: string };
 export type AutomationApproval = "none" | "reads" | "all";
-export function automationApproves(policy: AutomationApproval, name: string): boolean {
+export function automationApproves(policy: AutomationApproval, name: string, allowPush = false): boolean {
+    if (name === "git_push" && !allowPush) return false;
     return policy === "all" || policy === "reads" && ["web_search", "web_fetch"].includes(name);
 }
 type RequestScope = { key: string; label: string; allowSession: boolean; toolCallId?: string };
 export class ApprovalManager {
     private readonly automation = new Map<string, AutomationApproval>();
-    setAutomation(sessionId: string, policy: AutomationApproval) { this.forget(sessionId); this.automation.set(sessionId, policy); }
+    private readonly pushPermissions = new Set<string>();
+    setAutomation(sessionId: string, policy: AutomationApproval, allowPush = false) { this.forget(sessionId); this.automation.set(sessionId, policy); if (allowPush) this.pushPermissions.add(sessionId); }
     automationPolicy(sessionId: string) { return this.automation.get(sessionId); }
     private readonly grants = new Map<string, Set<string>>();
     forget(sessionId: string) {
         this.automation.delete(sessionId);
+        this.pushPermissions.delete(sessionId);
         this.grants.delete(sessionId);
         for (const pending of this.pending.values()) if (pending.sessionId === sessionId) pending.settle(false);
     }
     sessions() { return [...this.grants.keys()]; }
-    private readonly pending = new Map<string, { sessionId: string; toolName: string; allowSession: boolean; settle: (approved: boolean, remember?: boolean) => void }>();
+    private readonly pending = new Map<string, { sessionId: string; toolName: string; allowSession: boolean; confirmation?: string; settle: (approved: boolean, remember?: boolean) => void }>();
     request(sessionId: string, toolName: string, args: ApprovalEvent["args"], notify: ((event: ApprovalEvent) => Promise<void>) | undefined, signal?: AbortSignal, timeoutMs = 120_000, scope?: RequestScope): Promise<ApprovalGrant> {
         if (signal?.aborted) return Promise.reject(new PermissionDeniedError("Ação cancelada"));
-        const allowSession = !!scope?.allowSession && !["git_commit", "delete_file"].includes(toolName);
+        const allowSession = !!scope?.allowSession && !SESSION_APPROVAL_FORBIDDEN.includes(toolName);
+        const confirmation = toolName === "git_push" && ["main", "master"].includes(String(args.branch)) ? String(args.branch) : undefined;
         if (allowSession && scope && this.grants.get(sessionId)?.has(scope.key)) return Promise.resolve({ choice: "cached", scope: scope.label });
         if (!notify) return Promise.reject(new PermissionDeniedError("A ferramenta requer aprovação explícita: " + toolName));
         return new Promise((resolve, reject) => {
@@ -38,29 +43,31 @@ export class ApprovalManager {
                         if (grants.size >= 256) { reject(new PermissionDeniedError("Limite de permissões da sessão atingido; use Y para permitir uma vez.")); return; }
                         grants.add(scope.key); this.grants.set(sessionId, grants);
                     }
-                    resolve({ choice: remember ? "session" : "once", ...(scope && { scope: scope.label }) });
+                    resolve({ choice: remember ? "session" : "once", ...(scope && { scope: scope.label }), ...(confirmation && { confirmation }) });
                 }
                 else reject(new PermissionDeniedError("Ação negada, cancelada ou aprovação expirada"));
             };
             const onAbort = () => finish(false);
             const timer = setTimeout(onAbort, timeoutMs);
-            this.pending.set(approvalId, { sessionId, toolName, allowSession, settle: finish });
+            this.pending.set(approvalId, { sessionId, toolName, allowSession, confirmation, settle: finish });
             signal?.addEventListener("abort", onAbort, { once: true });
-            void notify({ type: "approval-required", approvalId, toolName, args, ...(scope && { scope: scope.label, allowSession, toolCallId: scope.toolCallId }) }).catch(() => finish(false));
+            void notify({ type: "approval-required", approvalId, toolName, args, ...(confirmation && { confirmation }), ...(scope && { scope: scope.label, allowSession, toolCallId: scope.toolCallId }) }).catch(() => finish(false));
         });
     }
-    decide(sessionId: string, approvalId: string, approved: boolean, remember = false): boolean {
+    decide(sessionId: string, approvalId: string, approved: boolean, remember = false, confirmation?: string): boolean {
         const entry = this.pending.get(approvalId);
         if (!entry || entry.sessionId !== sessionId || remember && (!approved || !entry.allowSession)) return false;
+        if (approved && entry.confirmation && confirmation !== entry.confirmation) return false;
         const policy = this.automation.get(sessionId);
-        entry.settle(approved && (policy === undefined || automationApproves(policy, entry.toolName)), remember && policy === undefined);
+        entry.settle(approved && (policy === undefined || automationApproves(policy, entry.toolName, this.pushPermissions.has(sessionId)) && !entry.confirmation), remember && policy === undefined);
         return true;
     }
 }
 export const approvals = new ApprovalManager();
 const READ_TOOLS = new Set(["read_file", "read_files", "project_inspect", "file_outline", "environment_check", "symbol_search", "test_discover", "git_show", "git_blame", "diff_summary", "list_directory", "glob", "grep", "git_status", "git_diff", "git_log", "todo_write"]);
-const APPROVAL_TOOLS = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "git_commit", "web_search", "web_fetch"]);
-const BUILD_TOOLS = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "bash", "git_commit"]);
+const GIT_WRITES = ["git_init", "git_switch", "git_remote_add", "git_push", "git_sync"];
+const APPROVAL_TOOLS = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "git_commit", "web_search", "web_fetch", ...GIT_WRITES]);
+const BUILD_TOOLS = new Set(["write_file", "edit_file", "delete_file", "move_file", "apply_patch", "bash", "git_commit", ...GIT_WRITES]);
 const SANDBOX_TOOLS = new Set(["bash", "type_check", "test_run"]);
 export function toolDecision(name: string, mode: "PLAN" | "BUILD", sandboxAvailable = false, automation?: AutomationApproval): "allow" | "approve" | "deny" {
     if (mode === "PLAN" && BUILD_TOOLS.has(name)) return "deny";

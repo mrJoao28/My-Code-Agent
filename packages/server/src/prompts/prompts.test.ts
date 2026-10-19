@@ -78,6 +78,14 @@ test("project notes are scoped, bounded and subordinate to user requests and per
     expect(buildSystemPrompt({ cwd: null, mode: "BUILD", projectInstructions: note })).not.toContain("use fixtures");
 });
 
+test("BUILD starts requested files in an empty workspace and stops after branch push for GitHub release", () => {
+    const prompt = buildSystemPrompt({ cwd: "/fixture", mode: "BUILD" });
+    expect(prompt).toContain("em pasta vazia, crie primeiro os arquivos pedidos");
+    expect(prompt).toContain("termine a geração dizendo qual branch foi enviada");
+    expect(prompt).toContain("Não inicie a próxima branch, nem sync, antes desse aviso");
+    expect(prompt).toContain("nunca resolva conflitos automaticamente");
+});
+
 test("PLAN does not instruct the model to create folder documentation", () => {
     const prompt = buildSystemPrompt({ cwd: "/fixture", mode: "PLAN" });
     expect(prompt).not.toContain("RESUME.md");

@@ -23,7 +23,10 @@ não libera uma pasta inteira nem outra ferramenta ou workspace. Para web_fetch,
 vale a origem web aprovada (domínio, protocolo e porta), incluindo outros caminhos
 nessa origem, sem incluir subdomínios. Redirecionamentos para outra origem são
 recusados com instrução para fazer nova chamada, permitindo aprovar o novo destino.
-git_commit e delete_file sempre pedem aprovação individual. Há até 256 escopos
+git_commit, delete_file, git_init, git_remote_add e git_push sempre pedem aprovação
+individual. Push exibe a URL completa e a branch; para main/master, Y abre uma
+segunda confirmação e M autoriza explicitamente. Em `exec`, `--approve all`
+precisa também de `--allow-push`, que não confirma main/master. Há até 256 escopos
 por sessão. As permissões acabam com o processo ou com a retenção da sessão;
 autorização do workspace, validação de caminhos e cancelamento são rechecados.
 Não se reaproveita aprovação expirada ou negada. Comandos de diagnóstico na

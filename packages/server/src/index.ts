@@ -119,7 +119,7 @@ return routes;
 
 export type AppType = ReturnType<typeof createApp>;
 
-export async function startServer(options: { port?: number; token: string; workspace: string; sessionId?: string; automationApproval?: AutomationApproval; onLockLost?: () => void; dockerAvailable?: boolean; signal?: AbortSignal; development?: boolean }) {
+export async function startServer(options: { port?: number; token: string; workspace: string; sessionId?: string; automationApproval?: AutomationApproval; allowPush?: boolean; onLockLost?: () => void; dockerAvailable?: boolean; signal?: AbortSignal; development?: boolean }) {
   if (options.automationApproval !== undefined && !options.sessionId) throw new Error("Automação exige uma sessão explícita.");
   const workspace = await workspaceTitle(options.workspace);
   const docker = options.dockerAvailable ?? await checkDocker(options.signal);
@@ -135,7 +135,7 @@ export async function startServer(options: { port?: number; token: string; works
       await validateSessionWorkspace(session, workspace);
       await leases.acquire(options.sessionId);
     }
-    if (options.automationApproval !== undefined) approvals.setAutomation(options.sessionId!, options.automationApproval);
+    if (options.automationApproval !== undefined) approvals.setAutomation(options.sessionId!, options.automationApproval, options.allowPush);
     const app = createApp(options.token, leases);
     const server = Bun.serve({ hostname: "127.0.0.1", port: options.port ?? 0, fetch: app.fetch, idleTimeout: 255 });
     setChatSessionLeases(leases);

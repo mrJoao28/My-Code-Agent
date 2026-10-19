@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
+import { messageContentSchema } from "@myagent/shared";
 import { Mode } from "@myagent/database";
 import { isModelConfigured, isSupportedChatModel } from "../lib/models";
 import { handleResume, handleSubmit, handleUndo } from "../services/chat-service";
 
 const submitSchema = z.object({
-  content: z.string().trim().min(1, "Message content is required").max(100_000),
+  content: messageContentSchema,
   mode: z.nativeEnum(Mode),
   model: z.string().refine(isSupportedChatModel, "Unsupported model"),
 });

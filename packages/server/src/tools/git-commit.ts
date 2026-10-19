@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { assertGitRepo, runGit, GitError } from "../utils/git";
+import { assertGitRepo, runGit, GitError, commitIdentity } from "../utils/git";
 import { resolveSafePath, toRelative } from "../utils/path";
 
 export function createGitCommitTool(cwd: string) {
@@ -21,8 +21,9 @@ export function createGitCommitTool(cwd: string) {
                 if (info?.isDirectory()) throw new GitError("Informe arquivos individuais.");
                 validated.push(toRelative(cwd, path));
             }
+            const identity = await commitIdentity(cwd, abortSignal);
             await runGit(cwd, ["add", "--", ...validated], 15_000, abortSignal);
-            await runGit(cwd, ["commit", "--only", "-m", message, "--", ...validated], 15_000, abortSignal);
+            await runGit(cwd, [...identity, "commit", "--only", "-m", message, "--", ...validated], 15_000, abortSignal);
             const { stdout } = await runGit(cwd, ["rev-parse", "--short", "HEAD"], 15_000, abortSignal);
             return { commitHash: stdout.trim(), message, files: validated };
         },

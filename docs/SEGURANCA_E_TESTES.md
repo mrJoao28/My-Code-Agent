@@ -69,7 +69,10 @@ A política fica em packages/server/src/security/tool-policy.ts e permissions.ts
 A CUI mostra comando, diff, caminho/prévia, movimentação ou URL completa. Y permite
 uma vez, A permite nesta sessão e no escopo exibido, N nega; Esc/Ctrl+C interrompem
 a geração. Enter não aprova. Há rolagem por setas e PgUp/PgDn. A não aparece para
-git_commit e delete_file. Aprovações expiram em dois minutos, não são reutilizáveis,
+git_commit, delete_file, git_init, git_remote_add e git_push. Push mostra URL e
+branch; main/master exigem Y seguido de M, validado no backend. `exec --approve
+all` não libera push sem `--allow-push` e nunca confirma main/master.
+Aprovações expiram em dois minutos, não são reutilizáveis,
 pertencem à sessão e são descartadas em caso de cancelamento/desconexão.
 Não há aprovação global silenciosa: o servidor guarda somente as permissões A
 aprovadas no ApprovalManager, por sessionId, até o processo encerrar ou a sessão

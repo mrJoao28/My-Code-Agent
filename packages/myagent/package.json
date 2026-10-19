@@ -1,6 +1,6 @@
 {
   "name": "@j2008/my-code-agent",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Assistente de programação no terminal. Requer Bun; Docker é opcional para comandos isolados.",
   "bin": {

@@ -1,6 +1,15 @@
 import { test, expect } from "bun:test";
-import { chatStreamEventSchema, messagePartsSchema, toolCallArgsSchema, type MessageParts } from "./schemas";
+import { chatStreamEventSchema, messagePartsSchema, toolCallArgsSchema, messageContentSchema, MAX_MESSAGE_LENGTH, type MessageParts } from "./schemas";
 import { SUPPORTED_CHAT_MODELS, DEFAULT_CHAT_MODEL_ID, findSupportedChatModel } from "./models";
+
+test("messages accept 9000 characters and reject larger or empty input; push confirmation survives SSE schema", () => {
+    expect(MAX_MESSAGE_LENGTH).toBe(9000);
+    expect(messageContentSchema.parse("x".repeat(9000))).toHaveLength(9000);
+    expect(messageContentSchema.safeParse("x".repeat(9001)).success).toBe(false);
+    expect(messageContentSchema.safeParse("  ").success).toBe(false);
+    const approval = { type: "approval-required" as const, approvalId: "push", toolName: "git_push", args: { branch: "main", url: "https://github.com/o/r" }, confirmation: "main", allowSession: false };
+    expect(chatStreamEventSchema.parse(approval)).toEqual(approval);
+});
 test("persisted parts retain reasoning, tool arguments/results and text", () => {
     const parts: MessageParts = [
         { type: "reasoning", text: "summary" },

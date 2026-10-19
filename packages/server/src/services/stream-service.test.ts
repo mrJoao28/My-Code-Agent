@@ -1,6 +1,10 @@
 import { test, expect, mock } from "bun:test";
 import { streamAIResponse, cancelAllGenerations, type StreamDependencies, type StreamParams } from "./stream-service";
-import { streamText } from "ai";
+import { streamText, tool } from "ai";
+import { z } from "zod";
+import { ApprovalManager } from "../security/permissions";
+import { secureTools } from "../security/tool-policy";
+import { runGit } from "../utils/git";
 import { MockLanguageModelV3, convertArrayToReadableStream } from "ai/test";
 import { getSessionTodos, clearSessionTodos } from "../tools/todo-write";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
@@ -149,6 +153,54 @@ test("real SDK receives the first duplicate as a tool error and can recover with
     expect(fixture.created[0]?.status).toBe("COMPLETE");
     expect(fixture.events.at(-1)?.event).toBe("done");
 });
+
+test("real SDK stops tool use after approved push and asks for GitHub release before another branch", withFixture(async ({ cwd }) => {
+    await runGit(cwd, ["init", "-b", "main"]);
+    await runGit(cwd, ["remote", "add", "origin", "https://github.com/fixture/repo"]);
+    const fixture = setup([]), manager = new ApprovalManager();
+    fixture.params.cwd = cwd; fixture.params.mode = "BUILD";
+    fixture.params.history = [{ role: "user", content: "Envie feature/step e aguarde minha liberação" }];
+    let calls = 0, switches = 0, step = 0;
+    const previousRoots = process.env.MYAGENT_WORKSPACE_ROOTS;
+    process.env.MYAGENT_WORKSPACE_ROOTS = JSON.stringify([cwd]);
+    fixture.dependencies.createTools = (root, mode, session, security) => secureTools({
+        git_push: tool({ inputSchema: z.object({ remote: z.string(), branch: z.string(), url: z.string().optional() }),
+            execute: async input => { calls++; return { pushed: true, branch: input.branch }; } }),
+        git_switch: tool({ inputSchema: z.object({ branch: z.string(), create: z.boolean() }), execute: async () => { switches++; return { switched: true }; } }),
+    }, root, mode, session, { ...security, manager, notify: async event => {
+        expect(event.args.url).toBe("https://github.com/fixture/repo");
+        await security.notify?.(event); manager.decide(session, event.approvalId, true);
+    } });
+    const provider = new MockLanguageModelV3({ doStream: async options => {
+        const final = step++ > 0;
+        if (final) {
+            expect(options.toolChoice?.type).toBe("none");
+            expect(options.tools ?? []).toHaveLength(0);
+            expect(JSON.stringify(options.prompt)).toContain("Não inicie outra branch");
+        }
+        return { stream: convertArrayToReadableStream([
+            { type: "stream-start" as const, warnings: [] },
+            ...(final ? [
+                { type: "text-start" as const, id: "answer" },
+                { type: "text-delta" as const, id: "answer", delta: "Branch feature/step enviada. Libere o PR no GitHub e avise para continuar." },
+                { type: "text-end" as const, id: "answer" },
+            ] : [
+                { type: "tool-call" as const, toolCallId: "push", toolName: "git_push", input: '{"remote":"origin","branch":"feature/step"}' },
+                { type: "tool-call" as const, toolCallId: "next-branch", toolName: "git_switch", input: '{"branch":"feature/next","create":true}' },
+            ]),
+            { type: "finish" as const, finishReason: { unified: final ? "stop" as const : "tool-calls" as const, raw: undefined },
+                usage: { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 5, text: 5, reasoning: undefined } } },
+        ]) };
+    } });
+    fixture.dependencies.generate = streamText;
+    fixture.dependencies.resolveModel = () => ({ model: provider, provider: "ollama", modelId: "fixture", contextWindow: 200_000 });
+    try {
+        await streamAIResponse(fixture.stream, fixture.params, fixture.dependencies);
+        expect(calls).toBe(1); expect(switches).toBe(0); expect(provider.doStreamCalls).toHaveLength(2);
+        expect(fixture.created[0]).toMatchObject({ status: "COMPLETE", content: "Branch feature/step enviada. Libere o PR no GitHub e avise para continuar." });
+        expect(fixture.events.at(-1)?.event).toBe("done");
+    } finally { if (previousRoots === undefined) delete process.env.MYAGENT_WORKSPACE_ROOTS; else process.env.MYAGENT_WORKSPACE_ROOTS = previousRoots; }
+}), 30_000);
 
 function setup(parts: unknown[], controller = new AbortController()) {
     const created: Record<string, unknown>[] = [], events: { event: string; data: string }[] = [];

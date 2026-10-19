@@ -69,6 +69,13 @@ somente em Docker, sem fallback no host, sem rede e com snapshot somente leitura
 A imagem padrão é `oven/bun:1.3.13`; `MYAGENT_SANDBOX_IMAGE` permite outra imagem
 de confiança com as ferramentas e dependências necessárias. O pull acontece na primeira execução que precisar da imagem. Esses comandos
 isolados dispensam aprovação na CUI; em `exec` exigem `--approve all`.
+Mensagens permitem até 9.000 caracteres. Ferramentas Git em BUILD incluem init,
+criação/troca de branch, remote HTTPS, commit, push e sync `--ff-only`, com aprovação.
+Push, init e remote_add não permitem aprovação por sessão; main/master exigem Y
+seguido de M na CUI. `exec --approve all` só permite push de branches de trabalho
+com a flag adicional `--allow-push`. Após enviar uma branch, o agente para e espera
+que você libere o PR no GitHub e avise para continuar. Veja o README da raiz para
+identidade Git, credential helpers e `MYAGENT_GIT_ALLOWED_HOSTS`.
 Bash fica disponível só em BUILD. A imagem padrão
 não inclui automaticamente as dependências de seu projeto. Para copiar
 `node_modules`/`.venv` já instalados, use `MYAGENT_SANDBOX_DEPENDENCIES=1`;

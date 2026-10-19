@@ -1,5 +1,9 @@
 import { z } from "zod"
 
+export const MAX_MESSAGE_LENGTH = 9_000;
+export const messageContentSchema = z.string().trim().min(1).max(MAX_MESSAGE_LENGTH);
+export const SESSION_APPROVAL_FORBIDDEN: readonly string[] = ["git_commit", "delete_file", "git_push", "git_remote_add", "git_init"];
+
 export const toolCallArgsSchema = z.record(z.string(), z.json())
 
 const toolLimitWarningSchema = z.object({
@@ -49,6 +53,7 @@ export const chatStreamEventSchema = z.discriminatedUnion("type", [
     z.object({
         type: z.literal("approval-required"),
         approvalId: z.string(),
+        confirmation: z.string().max(200).optional(),
         scope: z.string().optional(),
         allowSession: z.boolean().optional(),
         toolCallId: z.string().optional(),

@@ -84,7 +84,7 @@ export async function executePrompt(options: ExecOptions, connection: Connection
             if (event.type === "tool-call") { result.toolCalls++; result.text = ""; }
             if (event.type === "usage") result.totalTokens = event.totalTokens;
             if (event.type === "approval-required") {
-                const approved = automationApproves(options.approve, event.toolName);
+                const approved = automationApproves(options.approve, event.toolName, options.allowPush) && !event.confirmation;
                 denied ||= !approved;
                 const decision = await request(`${connection.url}/permissions/${encodeURIComponent(connection.sessionId)}/${encodeURIComponent(event.approvalId)}`, {
                     method: "POST", headers, signal: connection.signal, body: JSON.stringify({ approved }),
@@ -127,7 +127,7 @@ export async function runExec(options: ExecOptions): Promise<number> {
         logger.level = "silent";
         const { startServer } = await import("@myagent/server");
         const token = randomBytes(32).toString("hex");
-        server = await startServer({ port: 0, token, workspace, sessionId: session.id, automationApproval: options.approve, onLockLost: interrupt, signal: controller.signal });
+        server = await startServer({ port: 0, token, workspace, sessionId: session.id, automationApproval: options.approve, allowPush: options.allowPush, onLockLost: interrupt, signal: controller.signal });
         const result = await executePrompt(options, { url: server.url, token, workspace, sessionId: session.id, signal: controller.signal }, {
             event: options.json ? event => { console.log(JSON.stringify(event)); } : undefined,
         });

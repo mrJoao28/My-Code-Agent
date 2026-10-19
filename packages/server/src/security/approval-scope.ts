@@ -1,6 +1,7 @@
 import { resolveSafePath, toRelative } from "../utils/path";
 import { validatePatchPaths } from "../tools/apply-patch";
 import type { ApprovalEvent } from "./permissions";
+import { SESSION_APPROVAL_FORBIDDEN } from "@myagent/shared";
 
 export async function affectedPaths(cwd: string, name: string, args: ApprovalEvent["args"]): Promise<string[]> {
     let paths: string[] = [];
@@ -30,6 +31,9 @@ export async function approvalScope(cwd: string, name: string, args: ApprovalEve
         const url = new URL(String(args.url));
         if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("URL pública sem credenciais necessária.");
         targets = [url.origin]; label = `Domínio: ${url.origin}`;
+    } else if (["git_push", "git_sync", "git_switch", "git_remote_add"].includes(name)) {
+        targets = [root, String(args.branch ?? ""), String(args.remote ?? ""), String(args.url ?? "")];
+        label = `Branch: ${args.branch ?? "—"} · Remote: ${args.remote ?? "—"} · URL: ${args.url ?? "—"}`;
     } else {
         targets = await affectedPaths(cwd, name, args);
         label = targets.length ? `Caminhos: ${targets.map(path => toRelative(root, path)).join(", ")}` : "Workspace atual";
@@ -37,5 +41,5 @@ export async function approvalScope(cwd: string, name: string, args: ApprovalEve
     }
     const canonical = (value: string) => process.platform === "win32" && name !== "web_fetch" ? value.toLowerCase() : value;
     return { key: JSON.stringify([name, canonical(root), ...targets.map(canonical)]), label,
-        allowSession: !["git_commit", "delete_file"].includes(name) };
+        allowSession: !SESSION_APPROVAL_FORBIDDEN.includes(name) };
 }

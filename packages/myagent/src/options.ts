@@ -1,4 +1,5 @@
-export type ExecOptions = { prompt: string; mode: "plan" | "build"; model?: string; json: boolean; approve: "none" | "reads" | "all" };
+import { MAX_MESSAGE_LENGTH } from "@myagent/shared";
+export type ExecOptions = { prompt: string; mode: "plan" | "build"; model?: string; json: boolean; approve: "none" | "reads" | "all"; allowPush?: boolean };
 export type Command = "open" | "resume" | "doctor" | "help" | "version";
 export function parseOptions(args: string[]): { command: Command; createNew: boolean; all: boolean } | ({ command: "exec" } & ExecOptions) {
     if (args[0] === "exec") {
@@ -14,6 +15,7 @@ export function parseOptions(args: string[]): { command: Command; createNew: boo
             if (seen.has(arg)) throw new Error("Opção repetida: " + arg);
             seen.add(arg);
             if (arg === "--json") { options.json = true; continue; }
+            if (arg === "--allow-push") { options.allowPush = true; continue; }
             const value = args[++i];
             if (!value || value.startsWith("--")) throw new Error("Valor ausente: " + arg);
             if (arg === "--mode" && (value === "plan" || value === "build")) options.mode = value;
@@ -21,7 +23,8 @@ export function parseOptions(args: string[]): { command: Command; createNew: boo
             else if (arg === "--model" && value.trim()) options.model = value;
             else throw new Error("Opção inválida: " + arg + ". Use myagent --help.");
         }
-        if (!options.prompt.trim() || options.prompt.length > 100_000) throw new Error("Informe um prompt de 1 a 100.000 caracteres. Use myagent --help.");
+        if (!options.prompt.trim() || options.prompt.trim().length > MAX_MESSAGE_LENGTH) throw new Error("Informe um prompt de 1 a 9.000 caracteres. Use myagent --help.");
+        if (options.allowPush && (options.mode !== "build" || options.approve !== "all")) throw new Error("--allow-push exige --mode build --approve all.");
         return { command: "exec", ...options };
     }
     if (args.length === 0) return { command: "open", createNew: false, all: false };
@@ -47,6 +50,8 @@ export const HELP = `My-Code-Agent — requer Bun >= 1.3.13.
                          none: leituras locais; reads: também rede de leitura;
                          all: autoriza ações, inclusive escritas e comandos.
                          Padrão none; comandos sempre exigem Docker.
+    --allow-push         Autoriza push de branches de trabalho com build/all.
+                         main/master exigem confirmação adicional na CUI.
     Saída: 0 sucesso; 1 falha; 3 aprovação negada; 130 cancelamento.
   myagent --version      Exibe a versão.
   myagent --help         Exibe esta ajuda.

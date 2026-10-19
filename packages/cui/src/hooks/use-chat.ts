@@ -266,8 +266,8 @@ export function useChat(sessionId: string, initialMessages: Message[], client = 
   }, [pendingResume, resume])
   const dismissResume = useCallback(() => setPendingResume(null), [])
 
-  const decideApproval = useCallback(async (id: string, approved: boolean, remember = false) => {
-    const res = await client.permissions[":sessionId"][":approvalId"].$post({ param: { sessionId, approvalId: id }, json: { approved, remember } })
+  const decideApproval = useCallback(async (id: string, approved: boolean, remember = false, confirmation?: string) => {
+    const res = await client.permissions[":sessionId"][":approvalId"].$post({ param: { sessionId, approvalId: id }, json: { approved, remember, confirmation } })
     if (res.ok || res.status === 404) setPendingApprovals(prev => prev.filter(item => item.approvalId !== id))
     if (!res.ok) throw new Error(await getErrorMessage(res))
   }, [client, sessionId])

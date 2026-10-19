@@ -8,12 +8,14 @@ import { resolveChatModel } from "../lib/models";
 import { buildSystemPrompt } from "../prompts";
 import { createTools, GLOBAL_GENERATION_TIMEOUT_MS, ToolCallGuard, ToolCallLimitError, ToolLoopDetectedError } from "./tool-service";
 import { logger } from "../lib/logger";
-import type { ModelMessage } from "ai";
+import type { ModelMessage, ToolSet } from "ai";
+import type { ToolSecurityOptions } from "../security/tool-policy";
 import { contextBudget, persistSessionContext, refreshSessionContext } from "./session-context";
 import { findModel } from "../lib/model-registry";
 import { ProjectInstructions } from "../lib/project-instructions";
 import { authorizeWorkspace } from "../security/workspaces";
 import { isDockerAvailable } from "../security/sandbox";
+import { redactGitArgs, redactGitOutput } from "../utils/git";
 
 const generations = new Set<{ controller: AbortController; done: Promise<void> }>();
 
@@ -38,6 +40,7 @@ export type StreamParams = {
 };
 
 export type StreamDependencies = {
+    createTools?: (cwd: string, mode: Mode, sessionId: string, security: ToolSecurityOptions, instructions?: ProjectInstructions) => ToolSet;
     db: Pick<PrismaClient, "message" | "sessionContext">;
     touchSession: (sessionId: string) => Promise<void>;
     resolveModel: typeof resolveChatModel;
@@ -71,14 +74,17 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
     const toolGuard = new ToolCallGuard();
     const instructions = cwd ? new ProjectInstructions(cwd) : undefined;
     let finalToolLimitStep = false;
+    let pushedBranch: string | undefined;
+    let pushing = false;
     const executions = new Set<Promise<unknown>>();
     let journal: GenerationJournal | undefined;
-    const tools = cwd ? createTools(cwd, mode, sessionId, {
+    const tools = cwd ? (dependencies.createTools ?? createTools)(cwd, mode, sessionId, {
         trackExecution: async run => {
             const execution = run(); executions.add(execution);
             try { return await execution; } finally { executions.delete(execution); }
         },
         beforeExecute: async (name, input, id) => {
+            if (pushing || pushedBranch) throw new Error("Aguarde a liberação do PR pelo usuário; finalize sem novas ferramentas.");
             preventEffectReplay(params.previousParts ?? [], name, input);
             if (!journal) throw new Error("Registro da geração indisponível");
             await journal.call(id, name, toolCallArgsSchema.parse(input));
@@ -89,8 +95,19 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
                 throw error;
             }
         },
-        beforeEffect: async (name, input, id) => { await journal!.call(id, name, toolCallArgsSchema.parse(input), true); },
-        afterExecute: async (name, id, result) => { await journal!.result(id, name, result); },
+        beforeEffect: async (name, input, id) => {
+            if (pushing || pushedBranch) throw new Error("Aguarde a liberação do PR pelo usuário; finalize sem novas ferramentas.");
+            if (name === "git_push") pushing = true;
+            await journal!.call(id, name, toolCallArgsSchema.parse(input), true);
+        },
+        afterExecute: async (name, id, result, failed) => {
+            if (name === "git_push") {
+                pushing = false;
+                if (!failed && result && typeof result === "object" && "pushed" in result && result.pushed === true && "branch" in result)
+                    pushedBranch = String(result.branch);
+            }
+            await journal!.result(id, name, result);
+        },
         notify: async event => { await stream.writeSSE({ event: event.type, data: JSON.stringify(event) }); },
     }, instructions) : undefined;
     let parts: MessagePart[] = [];
@@ -170,6 +187,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
                 abortController.signal.throwIfAborted();
                 const boundedMessages = await saveContext(messages, abortController.signal);
                 toolGuard.updateContext(boundedMessages);
+                if (pushedBranch) return { activeTools: [], toolChoice: "none", messages: [...boundedMessages, { role: "user", content: `A branch ${pushedBranch} foi enviada. Termine agora sem ferramentas: informe a branch, peça liberação do PR no GitHub e que o usuário avise para continuar. Não inicie outra branch.` }] };
                 if (!toolGuard.shouldSummarize) return { messages: boundedMessages };
                 if (!finalToolLimitStep) {
                     finalToolLimitStep = true;
@@ -234,7 +252,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
             }
 
             if (part.type === "tool-call") {
-                const args = toolCallArgsSchema.parse(part.input);
+                const args = toolCallArgsSchema.parse(part.toolName.startsWith("git_") ? redactGitArgs(part.input) : part.input);
 
 
                 try {
@@ -265,7 +283,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
             }
 
             if (part.type === "tool-result" || part.type === "tool-error") {
-                const resultStr = part.type === "tool-error"
+                let resultStr = part.type === "tool-error"
                     ? "Tool failed: " + (part.error instanceof Error ? part.error.message : String(part.error))
                     : typeof part.output === "string" ? part.output : JSON.stringify(part.output);
 
@@ -273,6 +291,7 @@ async function runAIResponse(stream: StreamSSEArg, params: StreamParams, depende
                     (p): p is Extract<MessagePart, { type: "tool-call" }> =>
                         p.type === "tool-call" && p.id === part.toolCallId
                 );
+                if (tcPart?.name.startsWith("git_")) resultStr = redactGitOutput(resultStr);
                 await journal.result(part.toolCallId, tcPart?.name ?? "unknown", resultStr);
                 const recorded = parts.find(item => item.type === "tool-result" && item.id === part.toolCallId);
                 if (recorded && !observedParts.includes(recorded)) observedParts.push(recorded);

@@ -18,6 +18,27 @@ test("exec validates explicit permissions, mode, model and JSONL without changin
     for (const args of [["exec"], ["exec", " "], ["exec", "a", "b"], ["exec", "a", "--approve", "yes"], ["exec", "a", "--mode", "BUILD"], ["exec", "a", "--model"], ["exec", "a", "--json", "--json"], ["exec", "a", "--unknown", "x"]]) expect(() => parseOptions(args)).toThrow();
 });
 
+test("exec requires a dedicated push flag and cannot auto-confirm main; prompt limit is 9000", async () => {
+    expect(parseOptions(["exec", "x".repeat(9000)])).toMatchObject({ command: "exec" });
+    expect(() => parseOptions(["exec", "x".repeat(9001)])).toThrow("9.000");
+    expect(() => parseOptions(["exec", "x", "--allow-push"])).toThrow("--mode build --approve all");
+    expect(parseOptions(["exec", "x", "--mode", "build", "--approve", "all", "--allow-push"])).toMatchObject({ allowPush: true });
+    for (const [allowPush, confirmation, expected] of [[false, undefined, false], [true, undefined, true], [true, "main", false]] as const) {
+        let approved: boolean | undefined;
+        const result = await executePrompt({ prompt: "push", mode: "build", approve: "all", json: true, allowPush }, {
+            url: "http://127.0.0.1", token: "fixture-private", workspace: "/fixture", sessionId: "s", signal: new AbortController().signal,
+        }, { fetch: async (url, init) => {
+            if (url.includes("/permissions/")) { approved = JSON.parse(String(init?.body)).approved; return Response.json({ accepted: true }); }
+            return new Response([
+                { type: "approval-required", approvalId: "push", toolName: "git_push", args: { branch: confirmation ?? "feature/x" }, confirmation },
+                { type: "done", messageId: "m", durationMs: 1 },
+            ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(""));
+        } });
+        expect(approved).toBe(expected);
+        expect(result.exitCode).toBe(expected ? 0 : 3);
+    }
+});
+
 test("JSON SSE preserves UTF-8 and CRLF across single-byte chunks", async () => {
     const source = new TextEncoder().encode('event: text-delta\r\ndata: {"type":"text-delta","text":"ação"}\r\n\r\ndata: {"type":"done","messageId":"m","durationMs":1}\r\n\r\n');
     const body = new ReadableStream<Uint8Array>({ start(controller) { for (const byte of source) controller.enqueue(new Uint8Array([byte])); controller.close(); } });

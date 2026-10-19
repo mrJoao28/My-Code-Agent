@@ -23,6 +23,11 @@ export function approvalPreview(approval: Approval): PreviewLine[] {
         case "move_file": return plain(`Origem: ${args.from}\nDestino: ${args.to}\nSobrescrever destino: ${args.overwrite ? "sim" : "não"}`);
         case "delete_file": return plain(`Origem: ${args.path}\nDestino: exclusão (checkpoint antes da ação)\nRecursiva: ${args.recursive ? "sim" : "não"}`);
         case "git_commit": return plain(`Criar commit:\n${args.message ?? ""}\nArquivos: ${JSON.stringify(args.files ?? [])}`);
+        case "git_init": return plain("Inicializar Git no workspace com branch main (sem criar commit).");
+        case "git_switch": return plain(`${args.create ? "Criar e trocar para" : "Trocar para"} branch: ${args.branch}`);
+        case "git_remote_add": return plain(`Adicionar remote: ${args.remote ?? "origin"}\nURL completa: ${args.url}`);
+        case "git_push": return plain(`Enviar branch: ${args.branch}\nRemote: ${args.remote ?? "origin"}\nURL completa: ${args.url}\nApós o envio, aguardar liberação do PR no GitHub.`);
+        case "git_sync": return plain(`Sincronizar principal: ${args.branch ?? "main"}\nRemote: ${args.remote ?? "origin"}\nURL completa: ${args.url}\nFetch seguido de merge --ff-only, sem resolver conflitos.`);
         case "web_search": return plain(`Busca web:\n${args.query ?? ""}`);
         default: return plain(JSON.stringify(args, null, 2));
     }

@@ -12,7 +12,7 @@ export function loadGlobalConfig(envPath = ENV_PATH, modelPath = join(myagentHom
   if (current === undefined) return;
   const customKeys = new Set(models.flatMap(model => model.apiKeyEnv ? [model.apiKeyEnv] : []));
   for (const [key, value] of Object.entries(parse(current))) {
-    if ((customKeys.has(key) || /^(MYAGENT_[A-Z0-9_]+_API_KEY|OLLAMA_BASE_URL|OLLAMA_API_KEY|TAVILY_API_KEY|MYAGENT_ENABLE_CHATGPT)$/.test(key)) && process.env[key] === undefined) process.env[key] = value;
+    if ((customKeys.has(key) || /^(MYAGENT_[A-Z0-9_]+_API_KEY|OLLAMA_BASE_URL|OLLAMA_API_KEY|TAVILY_API_KEY|MYAGENT_ENABLE_CHATGPT|MYAGENT_GIT_ALLOWED_HOSTS)$/.test(key)) && process.env[key] === undefined) process.env[key] = value;
   }
 }
 
