@@ -37,7 +37,7 @@
     "@opentui/core": "0.4.5",
     "@opentui/react": "0.4.5",
     "@prisma/adapter-libsql": "7.4.0",
-    "@prisma/client": "7.4.0",
+    "@prisma/client": "7.10.1",
     "react": "19.2.8"
   },
   "publishConfig": {
