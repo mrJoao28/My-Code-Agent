@@ -33,7 +33,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@libsql/client": "^0.15.15",
+    "@libsql/client": "^0.18.0",
     "@opentui/core": "0.4.5",
     "@opentui/react": "0.4.5",
     "@prisma/adapter-libsql": "7.4.0",
